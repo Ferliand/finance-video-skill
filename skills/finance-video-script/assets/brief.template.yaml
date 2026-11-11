@@ -1,0 +1,18 @@
+# Brief video. Isi sebelum menjalankan `build`. Jangan mengarang angka_kunci: isi dari pengguna.
+topik: {{topik}}
+format: {{format}}            # A = cerita bertokoh, B = panduan langkah bernomor
+durasi_menit: {{durasi}}      # 1-30
+audiens_spesifik: ""          # mis. "ojol dan pedagang kecil"
+angka_kunci: {}               # variabel; semua angka di naskah harus punya dasar. Contoh (ganti {} dengan):
+  # angka_kunci:
+  #   setoran_harian: 20000
+  #   target: 100000000
+jumlah_bagian: 3              # jumlah transformasi (A) atau strategi (B), 2-5
+tokoh: {}                     # khusus format A. Contoh (ganti {} dengan blok 'tokoh:'):
+  # tokoh:
+  #   protagonis: {nama: "Andi", pekerjaan: "karyawan", descriptor: "faceless flat-vector man, blue shirt"}
+  #   pembanding: {nama: "Budi", pekerjaan: "teman lama"}
+  #   figuran: {nama: "Pak Surya", pekerjaan: "bos"}
+instrumen_boleh_disebut: []   # mis. ["emas digital", "reksa dana pasar uang"]
+cta: {}                       # mis. {komentar: "Tulis: Hari ke-1", subscribe: true}
+catatan_khusus: ""
