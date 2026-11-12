@@ -22,9 +22,9 @@ NEGATIVE_SUFFIX = "no text, no letters, no numbers, no watermark, clean composit
 
 STYLE_PRESETS: dict[str, str] = {
     "claymation": (
-        "3D claymation style, handmade plasticine polymer clay texture with subtle fingerprints and sculpt tool marks, "
-        "matte finish, miniature 15cm diorama set, soft diffused studio softbox lighting, gentle contact shadows, "
-        "tilt-shift macro photography, shallow depth of field, chunky rounded silhouettes, pastel matte color palette, clean solid background"
+        "3D claymation style, handmade plasticine texture with subtle fingerprints, "
+        "miniature diorama set, soft diffused studio lighting, tilt-shift macro photography, "
+        "chunky rounded silhouettes, pastel matte color palette, clean solid background"
     ),
     "flat-vector": "modern flat vector illustration, warm editorial palette, soft gradients, atmospheric lighting, minimal facial detail",
     "3d-pixar": "3D Pixar Disney style render, Octane render, soft global illumination, warm cinematic lighting, expressive stylized environment",
@@ -96,19 +96,23 @@ def build_scene_prompt(
     style_override: str | None = None,
     prompt_override: str | None = None,
 ) -> str:
-    """Gabungkan style prefix, descriptor tokoh, deskripsi visual scene, dan akhiran negatif."""
+    """Susun prompt dengan urutan [Subjek & Aksi Utama] -> [Tokoh] -> [Style Terkunci] -> [Negative Suffix]."""
     style_prefix = resolve_style_prefix(style_override or brief.style)
     char_desc = {c.id: c.descriptor for c in bible.characters}
-    parts = [style_prefix]
+    raw_visual = prompt_override if prompt_override is not None else (scene.image_prompt or "")
+    visual = clean_prompt_flags(raw_visual) or _auto_visual_description(scene, brief)
+
+    parts: list[str] = [visual]
     for cid in scene.characters:
         if cid in char_desc and char_desc[cid]:
             parts.append(char_desc[cid])
-    raw_visual = prompt_override if prompt_override is not None else (scene.image_prompt or "")
-    visual = clean_prompt_flags(raw_visual) or _auto_visual_description(scene, brief)
-    parts.append(visual)
-    mood_hint = _MOOD_ATMOSPHERE.get(scene.mood)
-    if mood_hint and mood_hint not in visual:
-        parts.append(mood_hint)
+
+    # Hindari duplikasi kata kunci jika prompt pengguna sudah menulis spesifikasi claymation lengkap
+    if "claymation" not in visual.lower() or style_prefix != STYLE_PRESETS["claymation"]:
+        parts.append(style_prefix)
+    else:
+        parts.append("chunky rounded silhouettes, miniature diorama set, soft diffused studio lighting")
+
     parts.append(NEGATIVE_SUFFIX)
     return ", ".join(parts)
 
@@ -158,30 +162,26 @@ def render_fallback_canvas(scene: Scene, width: int, height: int) -> Image.Image
     }
     top_c, bot_c, glow_c = palettes.get(scene.mood, palettes["neutral"])
 
-    # Buat gradasi kecil lalu resize halus ke ukuran penuh agar sangat cepat
-    grad_small = Image.new("RGB", (2, 128))
-    for y in range(128):
-        ratio = y / 127.0
-        r = int(top_c[0] + (bot_c[0] - top_c[0]) * ratio)
-        g = int(top_c[1] + (bot_c[1] - top_c[1]) * ratio)
-        b = int(top_c[2] + (bot_c[2] - top_c[2]) * ratio)
-        grad_small.putpixel((0, y), (r, g, b))
-        grad_small.putpixel((1, y), (r, g, b))
-    base = grad_small.resize((width, height), Image.Resampling.BILINEAR).convert("RGBA")
-
-    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    cx, cy = width // 2, int(height * 0.42)
-    for idx, radius_factor in enumerate((0.42, 0.28, 0.16)):
-        rad = int(min(width, height) * radius_factor)
-        alpha = 26 + idx * 18
-        offset_x = ((scene.id * 53 + idx * 97) % 160) - 80
-        offset_y = ((scene.id * 37 + idx * 61) % 120) - 60
-        draw.ellipse(
-            [cx + offset_x - rad, cy + offset_y - rad, cx + offset_x + rad, cy + offset_y + rad],
-            fill=(glow_c[0], glow_c[1], glow_c[2], alpha),
-        )
-    return Image.alpha_composite(base, overlay).convert("RGB")
+    # Buat gradasi atmosferik halus + pendaran radial lembut (tanpa ring konsentris)
+    gw, gh = 64, 64
+    grad_small = Image.new("RGB", (gw, gh))
+    cx_f = 0.5 + (((scene.id * 53) % 20) - 10) / 100.0
+    cy_f = 0.42 + (((scene.id * 37) % 16) - 8) / 100.0
+    for y in range(gh):
+        ratio = y / (gh - 1.0)
+        br = top_c[0] + (bot_c[0] - top_c[0]) * ratio
+        bg = top_c[1] + (bot_c[1] - top_c[1]) * ratio
+        bb = top_c[2] + (bot_c[2] - top_c[2]) * ratio
+        dy = (y / (gh - 1.0)) - cy_f
+        for x in range(gw):
+            dx = (x / (gw - 1.0)) - cx_f
+            dist = (dx * dx + dy * dy) ** 0.5
+            glow = max(0.0, 1.0 - dist / 0.55) ** 2 * 0.28
+            r = min(255, int(br + (glow_c[0] - br) * glow))
+            g = min(255, int(bg + (glow_c[1] - bg) * glow))
+            b = min(255, int(bb + (glow_c[2] - bb) * glow))
+            grad_small.putpixel((x, y), (r, g, b))
+    return grad_small.resize((width, height), Image.Resampling.BICUBIC)
 
 
 def _compute_seed(slug: str, scene_id: int) -> int:

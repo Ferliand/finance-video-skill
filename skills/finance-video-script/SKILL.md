@@ -21,7 +21,7 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
 
 ## Alur kerja
 
-1. **Kumpulkan brief.** Tanyakan yang belum jelas: topik, format (A = cerita, B = panduan langkah, S = short-form 30–60 detik), durasi, `style` visual (preset: `flat-vector`, `3d-pixar`, `anime-ghibli`, `cinematic-realistic`, `watercolor`, `comic-book`, `dark-moody`, atau deskripsi custom bebas), audiens, `angka_kunci`, dan khusus format A tokoh (protagonis, pembanding, figuran). Tanyakan juga ajakan komentar/subscribe dan instrumen keuangan yang boleh disebut. **Jangan mengarang angka kunci**; angka berasal dari pengguna atau dari hitungan yang kamu tulis rumusnya.
+1. **Kumpulkan brief.** Tanyakan yang belum jelas: topik, format (A = cerita, B = panduan langkah, S = short-form 30–60 detik), durasi, `style` visual (preset: `claymation`, `flat-vector`, `3d-pixar`, `anime-ghibli`, `cinematic-realistic`, `watercolor`, `comic-book`, `dark-moody`, atau deskripsi custom bebas), audiens, `angka_kunci`, dan khusus format A tokoh (protagonis, pembanding, figuran). Tanyakan juga ajakan komentar/subscribe dan instrumen keuangan yang boleh disebut. **Jangan mengarang angka kunci**; angka berasal dari pengguna atau dari hitungan yang kamu tulis rumusnya.
 2. **Baca `references/panduan-naskah.md`** sebelum menulis apa pun. Itu sumber kebenaran gaya, teknik, dan aturan angka/klaim.
 3. **Buat proyek.** `init <slug> --topic "..." --format A|B|S --minutes N --style <style>`, isi `brief.yaml` bersama pengguna, lalu `build <slug>` (membuat story bible dan beat sheet).
 4. **Tulis per beat** (ulangi sampai semua beat selesai):
@@ -36,7 +36,7 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
    - `video-projects/<slug>/out/prompts.json` (prompt ilustrasi *full-screen* siap generate untuk seluruh scene lengkap dengan karakter & style)
    - `video-projects/<slug>/out/naskah.srt` (subtitle ber-timestamp)
 8. **Generate Aset Gambar AI Full-Screen.** Jalankan `generate-images <slug>` (bisa tambah `--style <style>`, `--scene <nomor>` untuk mengulang satu scene, atau `--force` untuk menimpa semua) untuk mengunduh gambar AI *full-screen* (Pollinations Flux) ke `video-projects/<slug>/out/images/scene_XXX.png`.
-9. **Render Video MP4 (opsional/jika diminta).** Jalankan `render <slug>` (bisa tambah `--voice id-ID-ArdiNeural` atau `id-ID-GadisNeural`) untuk menggabungkan gambar latar *full-screen* (dengan gerak kamera *Ken Burns*, *vignette*, overlay *glassmorphism* angka/punchline, dan subtitle karaoke), audio voiceover Bahasa Indonesia, menjadi `video-projects/<slug>/out/video.mp4`.
+9. **Render Video MP4 (opsional/jika diminta).** Jalankan `render <slug>` (bisa tambah `--voice id-ID-ArdiNeural` atau `id-ID-GadisNeural`, serta `--fps 12` untuk gaya stop-motion `claymation`) untuk menggabungkan gambar latar *full-screen* (dengan gerak *stop-motion* / *Ken Burns*, *vignette*, overlay *glassmorphism* angka/punchline, dan subtitle karaoke), audio voiceover Bahasa Indonesia, menjadi `video-projects/<slug>/out/video.mp4`.
 
 ## Format JSON scene
 
@@ -45,7 +45,8 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
   {"narration": "Strategi kesatu, uang harus dipisah di awal.",
    "tags": ["SECTION"], "image_prompt": "clean modern workspace with warm morning sunlight beams", "characters": [], "mood": "warm", "notes": ""},
   {"narration": "Kalau setiap hari kamu menyisihkan dua puluh ribu rupiah, dalam sebulan terkumpul enam ratus ribu rupiah.",
-   "tags": ["CALC"], "image_prompt": "neatly stacked glass savings jars with glowing coins on wooden desk", "characters": [], "mood": "neutral",
+   "tags": ["CALC"], "image_prompt": "neatly stacked glass savings jars with glowing coins on wooden desk",
+   "motion_prompt": "Stop-motion claymation, slow subtle push-in camera, soft ambient light flicker", "characters": [], "mood": "neutral",
    "notes": "20.000 x 30 = 600.000"}
 ]}
 ```
@@ -53,6 +54,8 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
 - `narration`: siap dibacakan, 15–35 kata. Scene `PUNCH` dan `SECTION` maksimal 14 kata dan berdiri sendiri.
 - `tags`: `PUNCH`, `BRIDGE`, `SECTION`, `CTA`, `NUMBER`, `CALC`. Syarat per beat ada di tugas dari `beat`.
 - `image_prompt`: bahasa Inggris, tanpa teks atau angka di dalam gambar; direkomendasikan diisi pada setiap scene agar latar *full-screen* sesuai konteks (jika `null`, engine otomatis meracik prompt latar kontekstual).
+- `end_image_prompt` (opsional): bahasa Inggris untuk *End Frame* jika scene memiliki transisi perubahan objek/pencahayaan (mis. sakelar lampu ditekan dari gelap ke terang; di-generate dengan *seed* yang sama).
+- `motion_prompt` (opsional): instruksi gerak per scene (mis. `zoom_flicker`, `bobbing`, `switch_light` untuk animasi *stop-motion claymation*).
 - `characters`: id tokoh dari story bible (mis. `protagonis`), bukan nama.
 - `mood`: `tense`, `neutral`, `warm`, `uplift`, `melancholy`.
 - `notes`: wajib berisi rumus `A x B = C` untuk scene `CALC`/`NUMBER`; tuliskan juga sumber klaim.

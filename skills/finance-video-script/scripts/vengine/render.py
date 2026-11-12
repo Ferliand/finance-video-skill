@@ -238,6 +238,29 @@ def _apply_tilt_shift_dof(img: Image.Image) -> Image.Image:
     return Image.composite(blurred, img, mask)
 
 
+def _make_smooth_radial_glow(
+    width: int,
+    height: int,
+    center_xy: tuple[float, float],
+    color: tuple[int, int, int],
+    max_alpha: int,
+    radius_scale: float = 0.55,
+) -> Image.Image:
+    """Buat layer RGBA pendaran cahaya radial yang benar-benar halus tanpa cincin lingkaran keras."""
+    gw, gh = 64, 64
+    small = Image.new("RGBA", (gw, gh), (0, 0, 0, 0))
+    cx, cy = center_xy[0] * gw, center_xy[1] * gh
+    max_d = max(gw, gh) * radius_scale
+    for y in range(gh):
+        for x in range(gw):
+            dist = math.hypot(x - cx, y - cy)
+            if dist < max_d:
+                falloff = (1.0 - dist / max_d) ** 2.2
+                a = _clamp_int(int(max_alpha * falloff))
+                small.putpixel((x, y), (color[0], color[1], color[2], a))
+    return small.resize((width, height), Image.Resampling.BICUBIC)
+
+
 def _apply_clay_stop_motion(
     raw_bg: Image.Image,
     end_bg: Image.Image | None,
@@ -264,7 +287,7 @@ def _apply_clay_stop_motion(
     jy = ((pose_idx * 53 + scene.id * 29) % 5) - 2
 
     if mode == "zoom_flicker":
-        # Slow push-in ke wajah karakter + gerak napas mikro + kedipan cahaya biru layar HP
+        # Slow push-in ke wajah karakter + gerak napas mikro + kedipan cahaya biru layar HP yang halus
         zoom = 1.0 + 0.12 * p_step
         breath = 1.0 + 0.012 * math.sin(pose_idx * 1.2)
         crop_w = max(1, int(width / zoom))
@@ -275,22 +298,21 @@ def _apply_clay_stop_motion(
         py = int((height - crop_h) * cy_off)
         frame = raw_bg.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BILINEAR)
 
-        # Efek soft blue screen light flickering di wajah & tubuh tanah liat
-        flicker_intensity = 0.55 + 0.45 * math.sin(pose_idx * 2.3 + 0.7)
-        glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        g_draw = ImageDraw.Draw(glow)
-        gx, gy = width // 2, int(height * 0.52)
-        for rad_f, base_a in ((0.46, 38), (0.30, 62), (0.18, 88)):
-            rad = int(min(width, height) * rad_f)
-            a = _clamp_int(int(base_a * flicker_intensity))
-            g_draw.ellipse([gx - rad, gy - rad, gx + rad, gy + rad], fill=(65, 165, 255, a))
+        flicker_intensity = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(pose_idx * 2.3 + 0.7))
+        glow = _make_smooth_radial_glow(
+            width,
+            height,
+            center_xy=(0.5, 0.55),
+            color=(70, 170, 255),
+            max_alpha=int(78 * flicker_intensity),
+            radius_scale=0.52,
+        )
         out = Image.alpha_composite(frame.convert("RGBA"), glow).convert("RGB")
         return _apply_tilt_shift_dof(out)
 
     if mode == "bob_and_sigh":
         # Kamera statis + ikon baterai merah di bagian atas memantul naik-turun + bahu karakter sedikit turun (sigh)
         base = raw_bg.copy()
-        # 1) Bobbing halus pada zona ikon di atas kepala (y: 0.06..0.44)
         bob_dy = int(math.sin(pose_idx * 1.4) * 22)
         icon_shifted = ImageChops.offset(base, jx, bob_dy)
         icon_mask = Image.new("L", (width, height), 0)
@@ -299,10 +321,9 @@ def _apply_clay_stop_motion(
             [int(width * 0.14), int(height * 0.05), int(width * 0.86), int(height * 0.44)],
             fill=255,
         )
-        icon_mask = icon_mask.filter(ImageFilter.GaussianBlur(radius=28))
+        icon_mask = icon_mask.filter(ImageFilter.GaussianBlur(radius=36))
         composed = Image.composite(icon_shifted, base, icon_mask)
 
-        # 2) Bahu & kepala karakter sedikit turun saat menghela napas (y: 0.45..0.86)
         slump_p = _ease_out_cubic(_clamp((p_step - 0.20) / 0.65))
         slump_dy = int(slump_p * 16) + jy
         body_shifted = ImageChops.offset(composed, jx, slump_dy)
@@ -312,31 +333,30 @@ def _apply_clay_stop_motion(
             [int(width * 0.16), int(height * 0.45), int(width * 0.84), int(height * 0.86)],
             fill=230,
         )
-        body_mask = body_mask.filter(ImageFilter.GaussianBlur(radius=32))
+        body_mask = body_mask.filter(ImageFilter.GaussianBlur(radius=40))
         composed = Image.composite(body_shifted, composed, body_mask)
         return _apply_tilt_shift_dof(composed)
 
     if mode == "switch_light":
         # Transisi Start Frame (redup, tangan menekan sakelar) -> End Frame (sakelar terangkat, cahaya studio hangat)
-        dim_start = ImageEnhance.Brightness(raw_bg).enhance(0.72)
-        bright_end = end_bg if end_bg is not None else ImageEnhance.Brightness(raw_bg).enhance(1.28)
+        dim_start = ImageEnhance.Brightness(raw_bg).enhance(0.68)
+        bright_end = end_bg if end_bg is not None else ImageEnhance.Brightness(raw_bg).enhance(1.25)
         flip_p = _clamp((p_step - 0.42) / 0.22)
         if flip_p <= 0.0:
-            # Tangan bergerak mikro mendekati sakelar sebelum klik
-            pre_dy = int(-p_step * 18) + jy
+            pre_dy = int(-p_step * 16) + jy
             frame = ImageChops.offset(dim_start, jx, pre_dy)
         else:
             blended = Image.blend(dim_start, bright_end, flip_p)
             frame = ImageChops.offset(blended, jx, jy)
-            # Warm studio light bloom menyebar memenuhi ruangan miniatur
-            bloom = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            bl_draw = ImageDraw.Draw(bloom)
             bloom_intensity = _ease_out_cubic(flip_p)
-            bx, by = width // 2, int(height * 0.38)
-            for rad_f, base_a in ((0.65, 48), (0.42, 75), (0.24, 95)):
-                rad = int(max(width, height) * rad_f)
-                a = _clamp_int(int(base_a * bloom_intensity))
-                bl_draw.ellipse([bx - rad, by - rad, bx + rad, by + rad], fill=(255, 220, 130, a))
+            bloom = _make_smooth_radial_glow(
+                width,
+                height,
+                center_xy=(0.5, 0.36),
+                color=(255, 220, 130),
+                max_alpha=int(90 * bloom_intensity),
+                radius_scale=0.72,
+            )
             frame = Image.alpha_composite(frame.convert("RGBA"), bloom).convert("RGB")
         return _apply_tilt_shift_dof(frame)
 
