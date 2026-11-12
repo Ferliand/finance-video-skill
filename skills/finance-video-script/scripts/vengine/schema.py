@@ -98,6 +98,7 @@ class Scene(BaseModel):
     audio_file: str | None = None
     image_file: str | None = None
     end_image_file: str | None = None
+    pose_files: list[str] = Field(default_factory=list)
     duration: float | None = None
     words: list[WordTiming] = Field(default_factory=list)
 

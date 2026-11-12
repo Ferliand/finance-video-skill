@@ -269,12 +269,18 @@ def _apply_clay_stop_motion(
     height: int,
     t: float,
     duration: float,
+    pose_images: list[Image.Image] | None = None,
 ) -> Image.Image:
-    """Render gerak stop-motion 12 FPS (stepped cadence 'on twos', flicker, bobbing, atau switch light)."""
+    """Render gerak stop-motion 12 FPS (multi-pose clay keyframes, stepped cadence 'on twos', flicker, bobbing, atau switch light)."""
     if raw_bg.size != (width, height):
         raw_bg = raw_bg.resize((width, height), Image.Resampling.BILINEAR)
     if end_bg is not None and end_bg.size != (width, height):
         end_bg = end_bg.resize((width, height), Image.Resampling.BILINEAR)
+
+    poses: list[Image.Image] = []
+    if pose_images:
+        for pim in pose_images:
+            poses.append(pim.resize((width, height), Image.Resampling.BILINEAR) if pim.size != (width, height) else pim)
 
     mode = _detect_clay_motion_mode(scene)
     # Kuantisasi waktu ke 6 pose/detik ('on twos' pada 12 FPS) agar terasa patah-patah organik khas claymation
@@ -287,16 +293,23 @@ def _apply_clay_stop_motion(
     jy = ((pose_idx * 53 + scene.id * 29) % 5) - 2
 
     if mode == "zoom_flicker":
+        # Pilih keyframe pose karakter (0=netral, 2=tarik napas/scroll, 1=kedip mata & angguk) pada ritme stop-motion
+        active_bg = raw_bg
+        if len(poses) >= 2:
+            cycle = (0, 0, 2, 2, 0, 1, 0, 0, 2, 2, 1, 0)
+            act_idx = int(t * 3.5) % len(cycle)
+            active_bg = poses[cycle[act_idx] % len(poses)]
+
         # Slow push-in ke wajah karakter + gerak napas mikro + kedipan cahaya biru layar HP yang halus
         zoom = 1.0 + 0.12 * p_step
-        breath = 1.0 + 0.012 * math.sin(pose_idx * 1.2)
+        breath = 1.0 + 0.010 * math.sin(pose_idx * 1.2)
         crop_w = max(1, int(width / zoom))
         crop_h = max(1, int(height / (zoom * breath)))
         cx_off = _clamp(0.5 + (jx / width), 0.0, 1.0)
         cy_off = _clamp(0.42 + (jy / height), 0.0, 1.0)
         px = int((width - crop_w) * cx_off)
         py = int((height - crop_h) * cy_off)
-        frame = raw_bg.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BILINEAR)
+        frame = active_bg.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BILINEAR)
 
         flicker_intensity = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(pose_idx * 2.3 + 0.7))
         glow = _make_smooth_radial_glow(
@@ -304,20 +317,27 @@ def _apply_clay_stop_motion(
             height,
             center_xy=(0.5, 0.55),
             color=(70, 170, 255),
-            max_alpha=int(78 * flicker_intensity),
+            max_alpha=int(72 * flicker_intensity),
             radius_scale=0.52,
         )
         out = Image.alpha_composite(frame.convert("RGBA"), glow).convert("RGB")
         return _apply_tilt_shift_dof(out)
 
     if mode == "bob_and_sigh":
-        # Kamera statis + ikon baterai merah (zona atas y < 0.27) memantul utuh + tubuh/kepala (y > 0.29) turun halus
-        base = raw_bg.copy()
-        bob_dy = int(math.sin(pose_idx * 1.4) * 18)
+        # Pilih keyframe pose ekspresi (0=netral, 2=melirik baterai di atas, 1=menghela napas mata terpejam & baterai berkedip mati)
+        active_bg = raw_bg
+        if len(poses) >= 2:
+            cycle = (0, 0, 2, 2, 0, 1, 1, 2, 2, 1, 1, 0)
+            act_idx = int(t * 3.2) % len(cycle)
+            active_bg = poses[cycle[act_idx] % len(poses)]
+
+        base = active_bg.copy()
+        bob_amp = 10 if len(poses) >= 2 else 18
+        bob_dy = int(math.sin(pose_idx * 1.4) * bob_amp)
         icon_shifted = ImageChops.offset(base, jx, bob_dy)
 
         slump_p = _ease_out_cubic(_clamp((p_step - 0.20) / 0.65))
-        slump_dy = int(slump_p * 14) + jy
+        slump_dy = (jy if len(poses) >= 2 else int(slump_p * 14) + jy)
         body_shifted = ImageChops.offset(base, jx, slump_dy)
 
         # Mask vertikal ber-feather di celah kosong antara baterai dan rambut (y = 0.26..0.30) agar objek utuh
@@ -338,7 +358,42 @@ def _apply_clay_stop_motion(
         return _apply_tilt_shift_dof(composed)
 
     if mode == "switch_light":
-        # Transisi taktil Start Frame (redup, sakelar bawah) -> End Frame (sakelar atas, cahaya studio hangat)
+        # Jika ada rangkaian multi-pose (mendekat -> menyentuh bawah -> dorong tengah -> sakelar atas menyala)
+        if len(poses) >= 3:
+            if p_step < 0.22:
+                stage_img = poses[0]
+                warm_factor = 0.0
+            elif p_step < 0.42:
+                stage_img = poses[1]
+                warm_factor = 0.0
+            elif p_step < 0.56:
+                stage_img = poses[min(2, len(poses) - 1)]
+                warm_factor = 0.45
+            else:
+                stage_img = poses[-1]
+                warm_factor = 1.0
+
+            zoom = 1.0 + 0.06 * p_step
+            crop_w = max(1, int(width / zoom))
+            crop_h = max(1, int(height / zoom))
+            px = int((width - crop_w) * _clamp(0.5 + (jx / width), 0.0, 1.0))
+            py = int((height - crop_h) * _clamp(0.48 + (jy / height), 0.0, 1.0))
+            frame = stage_img.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BILINEAR)
+
+            if warm_factor > 0.0:
+                warm_pulse = 0.65 + 0.35 * (0.5 + 0.5 * math.sin(pose_idx * 1.5))
+                bloom = _make_smooth_radial_glow(
+                    width,
+                    height,
+                    center_xy=(0.45, 0.42),
+                    color=(255, 220, 130),
+                    max_alpha=int(46 * warm_factor * warm_pulse),
+                    radius_scale=0.68,
+                )
+                frame = Image.alpha_composite(frame.convert("RGBA"), bloom).convert("RGB")
+            return _apply_tilt_shift_dof(frame)
+
+        # Fallback 2-keyframe: Start Frame (redup, sakelar bawah) -> End Frame (sakelar atas, cahaya studio hangat)
         dim_start = raw_bg if end_bg is not None else ImageEnhance.Brightness(raw_bg).enhance(0.68)
         bright_end = end_bg if end_bg is not None else ImageEnhance.Brightness(raw_bg).enhance(1.25)
         flip_p = _clamp((p_step - 0.34) / 0.10)
@@ -497,6 +552,7 @@ def render_scene_frame_at(
     topic: str = "",
     bg_image: Image.Image | None = None,
     end_bg_image: Image.Image | None = None,
+    pose_images: list[Image.Image] | None = None,
 ) -> Image.Image:
     """Render satu frame Image full-screen pada waktu t (detik) dengan Ken Burns / Clay Stop-Motion & glassmorphism RGBA."""
     duration = max(0.5, duration)
@@ -511,9 +567,16 @@ def render_scene_frame_at(
     # 1. Layer Dasar: Full-Screen AI Image + Clay Stop-Motion atau Ken Burns
     raw_bg = _resolve_scene_bg(scene, width=width, height=height, bg_image=bg_image)
     raw_end_bg = _resolve_scene_end_bg(scene, width=width, height=height, end_bg_image=end_bg_image)
-    if scene.motion_prompt or raw_end_bg is not None:
+    if scene.motion_prompt or raw_end_bg is not None or (pose_images and len(pose_images) >= 2):
         zoomed_bg = _apply_clay_stop_motion(
-            raw_bg, raw_end_bg, scene, width=width, height=height, t=t, duration=duration
+            raw_bg,
+            raw_end_bg,
+            scene,
+            width=width,
+            height=height,
+            t=t,
+            duration=duration,
+            pose_images=pose_images,
         )
     else:
         zoomed_bg = _apply_fullscreen_ken_burns(raw_bg, width=width, height=height, p=p, scene_id=scene.id)
@@ -753,11 +816,19 @@ def render_scene_frame(
     duration: float = 3.0,
     bg_image: Image.Image | None = None,
     end_bg_image: Image.Image | None = None,
+    pose_images: list[Image.Image] | None = None,
 ) -> Path:
     """Simpan satu snapshot PNG dari scene (default pada t=1.0 dtk untuk thumbnail/pratinjau)."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img = render_scene_frame_at(
-        scene, t=t, duration=duration, fmt=fmt, topic=topic, bg_image=bg_image, end_bg_image=end_bg_image
+        scene,
+        t=t,
+        duration=duration,
+        fmt=fmt,
+        topic=topic,
+        bg_image=bg_image,
+        end_bg_image=end_bg_image,
+        pose_images=pose_images,
     )
     img.save(out_path, format="PNG")
     return out_path
@@ -807,6 +878,7 @@ def _render_animated_segment(
     fps: int = 15,
     bg_image: Image.Image | None = None,
     end_bg_image: Image.Image | None = None,
+    pose_images: list[Image.Image] | None = None,
 ) -> None:
     """Pipe rangkaian frame animasi RGB langsung ke FFmpeg untuk menghasilkan segmen MP4 yang bergerak halus."""
     is_vertical = fmt == "S"
@@ -838,7 +910,14 @@ def _render_animated_segment(
         for f_idx in range(total_frames):
             t = f_idx / fps
             frame_img = render_scene_frame_at(
-                scene, t=t, duration=duration, fmt=fmt, topic=topic, bg_image=bg_image, end_bg_image=end_bg_image
+                scene,
+                t=t,
+                duration=duration,
+                fmt=fmt,
+                topic=topic,
+                bg_image=bg_image,
+                end_bg_image=end_bg_image,
+                pose_images=pose_images,
             )
             proc.stdin.write(frame_img.tobytes())
         proc.stdin.close()
@@ -887,6 +966,7 @@ def render_project(
     frames_dir = project.out_dir / "frames"
     audio_dir = project.out_dir / "audio"
     segments_dir = project.out_dir / "segments"
+    images_dir = project.out_dir / "images"
     for d in (frames_dir, audio_dir, segments_dir):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -913,6 +993,15 @@ def render_project(
                 with Image.open(end_p) as loaded_end:
                     end_bg_img = loaded_end.convert("RGB")
 
+        # Deteksi otomatis keyframe multi-pose (scene_XXX_pose1.png, pose2.png, dst.)
+        pose_imgs: list[Image.Image] = []
+        pose_paths = sorted(images_dir.glob(f"scene_{s.id:03d}_pose*.png"))
+        if pose_paths:
+            s.pose_files = [str(pp.relative_to(project.root)) for pp in pose_paths]
+            for pp in pose_paths:
+                with Image.open(pp) as loaded_pose:
+                    pose_imgs.append(loaded_pose.convert("RGB"))
+
         spoken = s.tts_text or s.narration
         dur = synth(spoken, audio_path, voice)
         s.duration = round(dur, 3)
@@ -927,6 +1016,7 @@ def render_project(
             duration=s.duration,
             bg_image=bg_img,
             end_bg_image=end_bg_img,
+            pose_images=pose_imgs or None,
         )
         s.audio_file = str(audio_path.relative_to(project.root))
 
@@ -941,6 +1031,7 @@ def render_project(
             fps=fps,
             bg_image=bg_img,
             end_bg_image=end_bg_img,
+            pose_images=pose_imgs or None,
         )
         segment_files.append(seg_path)
 
