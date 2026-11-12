@@ -9,7 +9,7 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
 
 ## Cakupan
 
-- Termasuk: brief → beat sheet → naskah per beat (`scenes.json`) → lint → pemetaan halaman visual (`map-pages`) → ekspor (`naskah.md`, `prompts.json`, `naskah.srt`) → render video MP4 lengkap dengan TTS Bahasa Indonesia (`render`).
+- Termasuk: brief (termasuk pilihan `style` visual) → beat sheet → naskah per beat (`scenes.json`) → lint → pemetaan halaman visual (`map-pages`) → ekspor (`naskah.md`, `prompts.json`, `naskah.srt`) → generate aset gambar AI *full-screen* (`generate-images`) → render video MP4 sinematik lengkap dengan TTS Bahasa Indonesia (`render`).
 - Belum termasuk: upload otomatis ke platform.
 
 ## Persiapan
@@ -21,37 +21,38 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
 
 ## Alur kerja
 
-1. **Kumpulkan brief.** Tanyakan yang belum jelas: topik, format (A = cerita, B = panduan langkah, S = short-form 30–60 detik), durasi, audiens, `angka_kunci`, dan khusus format A tokoh (protagonis, pembanding, figuran). Tanyakan juga ajakan komentar/subscribe dan instrumen keuangan yang boleh disebut. **Jangan mengarang angka kunci**; angka berasal dari pengguna atau dari hitungan yang kamu tulis rumusnya.
+1. **Kumpulkan brief.** Tanyakan yang belum jelas: topik, format (A = cerita, B = panduan langkah, S = short-form 30–60 detik), durasi, `style` visual (preset: `flat-vector`, `3d-pixar`, `anime-ghibli`, `cinematic-realistic`, `watercolor`, `comic-book`, `dark-moody`, atau deskripsi custom bebas), audiens, `angka_kunci`, dan khusus format A tokoh (protagonis, pembanding, figuran). Tanyakan juga ajakan komentar/subscribe dan instrumen keuangan yang boleh disebut. **Jangan mengarang angka kunci**; angka berasal dari pengguna atau dari hitungan yang kamu tulis rumusnya.
 2. **Baca `references/panduan-naskah.md`** sebelum menulis apa pun. Itu sumber kebenaran gaya, teknik, dan aturan angka/klaim.
-3. **Buat proyek.** `init <slug> --topic "..." --format A|B|S --minutes N`, isi `brief.yaml` bersama pengguna, lalu `build <slug>` (membuat story bible dan beat sheet).
+3. **Buat proyek.** `init <slug> --topic "..." --format A|B|S --minutes N --style <style>`, isi `brief.yaml` bersama pengguna, lalu `build <slug>` (membuat story bible dan beat sheet).
 4. **Tulis per beat** (ulangi sampai semua beat selesai):
    1. `beat <slug>` menampilkan tugas untuk beat berikutnya: brief, tokoh, tiga scene sebelumnya, poin isi, target kata/scene, dan syarat tag.
-   2. Tulis JSON scene ke `video-projects/<slug>/draft/<beat>.json`.
+   2. Tulis JSON scene ke `video-projects/<slug>/draft/<beat>.json`. Isi `image_prompt` berbahasa Inggris untuk **setiap scene** (karena seluruh scene dirender *full-screen*).
    3. `add <slug> --beat <id> --file video-projects/<slug>/draft/<id>.json`.
    4. Jika ada **error**, beat tidak disimpan. Perbaiki JSON sesuai pesan lalu `add` lagi. Jika beat perlu ditulis ulang setelah tersimpan, tambahkan `--replace`. Jangan memakai `--force` kecuali pengguna meminta.
 5. **Periksa.** `status <slug>` untuk progres, `lint <slug>` untuk pemeriksaan penuh. Error harus nol sebelum naskah ditunjukkan sebagai final; warn dibaca dan diputuskan bersama pengguna.
 6. **Petakan Halaman Visual.** Jalankan `map-pages <slug>` untuk memetakan `page_type` dan `props` secara otomatis mengikuti katalog `references/design-video.md`.
 7. **Ekspor.** `export <slug>` menghasilkan:
    - `video-projects/<slug>/out/naskah.md` (naskah kanonik per babak)
-   - `video-projects/<slug>/out/prompts.json` (prompt ilustrasi siap generate lengkap dengan karakter & style)
+   - `video-projects/<slug>/out/prompts.json` (prompt ilustrasi *full-screen* siap generate untuk seluruh scene lengkap dengan karakter & style)
    - `video-projects/<slug>/out/naskah.srt` (subtitle ber-timestamp)
-8. **Render Video MP4 (opsional/jika diminta).** Jalankan `render <slug>` (bisa tambah `--voice id-ID-ArdiNeural` atau `id-ID-GadisNeural`) untuk membuat slide grafis, audio voiceover Bahasa Indonesia, dan menyatukannya menjadi `video-projects/<slug>/out/video.mp4`.
+8. **Generate Aset Gambar AI Full-Screen.** Jalankan `generate-images <slug>` (bisa tambah `--style <style>`, `--scene <nomor>` untuk mengulang satu scene, atau `--force` untuk menimpa semua) untuk mengunduh gambar AI *full-screen* (Pollinations Flux) ke `video-projects/<slug>/out/images/scene_XXX.png`.
+9. **Render Video MP4 (opsional/jika diminta).** Jalankan `render <slug>` (bisa tambah `--voice id-ID-ArdiNeural` atau `id-ID-GadisNeural`) untuk menggabungkan gambar latar *full-screen* (dengan gerak kamera *Ken Burns*, *vignette*, overlay *glassmorphism* angka/punchline, dan subtitle karaoke), audio voiceover Bahasa Indonesia, menjadi `video-projects/<slug>/out/video.mp4`.
 
 ## Format JSON scene
 
 ```json
 {"scenes": [
   {"narration": "Strategi kesatu, uang harus dipisah di awal.",
-   "tags": ["SECTION"], "image_prompt": null, "characters": [], "mood": "warm", "notes": ""},
+   "tags": ["SECTION"], "image_prompt": "clean modern workspace with warm morning sunlight beams", "characters": [], "mood": "warm", "notes": ""},
   {"narration": "Kalau setiap hari kamu menyisihkan dua puluh ribu rupiah, dalam sebulan terkumpul enam ratus ribu rupiah.",
-   "tags": ["CALC"], "image_prompt": null, "characters": [], "mood": "neutral",
+   "tags": ["CALC"], "image_prompt": "neatly stacked glass savings jars with glowing coins on wooden desk", "characters": [], "mood": "neutral",
    "notes": "20.000 x 30 = 600.000"}
 ]}
 ```
 
 - `narration`: siap dibacakan, 15–35 kata. Scene `PUNCH` dan `SECTION` maksimal 14 kata dan berdiri sendiri.
 - `tags`: `PUNCH`, `BRIDGE`, `SECTION`, `CTA`, `NUMBER`, `CALC`. Syarat per beat ada di tugas dari `beat`.
-- `image_prompt`: bahasa Inggris, tanpa teks atau angka di dalam gambar; `null` untuk scene yang tampil sebagai kartu.
+- `image_prompt`: bahasa Inggris, tanpa teks atau angka di dalam gambar; direkomendasikan diisi pada setiap scene agar latar *full-screen* sesuai konteks (jika `null`, engine otomatis meracik prompt latar kontekstual).
 - `characters`: id tokoh dari story bible (mis. `protagonis`), bukan nama.
 - `mood`: `tense`, `neutral`, `warm`, `uplift`, `melancholy`.
 - `notes`: wajib berisi rumus `A x B = C` untuk scene `CALC`/`NUMBER`; tuliskan juga sumber klaim.

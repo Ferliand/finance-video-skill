@@ -113,7 +113,10 @@ python skills/finance-video-script/scripts/vengine_cli.py map-pages uang-harian
 # 7. Ekspor naskah.md, prompts.json, dan naskah.srt
 python skills/finance-video-script/scripts/vengine_cli.py export uang-harian
 
-# 8. Render video MP4 beranimasi + voiceover Bahasa Indonesia
+# 8. Generate aset gambar AI full-screen terlebih dahulu dengan style pilihan
+python skills/finance-video-script/scripts/vengine_cli.py generate-images uang-harian --style 3d-pixar
+
+# 9. Render video MP4 beranimasi full-screen + voiceover Bahasa Indonesia
 python skills/finance-video-script/scripts/vengine_cli.py render uang-harian --voice id-ID-ArdiNeural
 ```
 

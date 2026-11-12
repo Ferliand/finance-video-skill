@@ -45,9 +45,10 @@ video-projects/<slug>/
 | `project.py` | Mengelola pembuatan direktori proyek, validasi slug, dan penulisan file JSON/YAML secara atomik (`atomic_write`). |
 | `lint_script.py` | Mengecek struktur beat, panjang kalimat, rumus matematika di `notes` (`_eval_formula` dengan dukungan tanda kurung), klaim statistik tanpa sumber, kalimat disclaimer, nilai Rupiah tanpa dasar, dan kemiripan *n-gram* dengan referensi. |
 | `page_mapper.py` | Memetakan setiap `Scene` secara deterministik ke `PageType` (`section_title`, `punchline_card`, `calc_step`, `number_callout`, `myth_card`, `before_after`, `cta_comment`, `bank_screen`, `chat_bubble`, `phase_cards`, `diagram`, `illustration`). |
+| `image_gen.py` | Menyediakan preset `STYLE_PRESETS` & resolusi custom style, meracik prompt visual *full-screen* untuk seluruh scene (`build_scene_prompt`), serta mengunduh aset gambar AI dari Pollinations Flux (`generate_project_images`) ke `out/images/` dengan dukungan *fallback* atmosferik. |
 | `workflow.py` | Mengoordinasikan alur `build`, pembuatan prompt tugas per beat (`beat_brief`), penyimpanan scene (`add_scenes`), status, serta ekspor (`export_markdown`, `export_prompts`, `export_srt`). |
-| `render.py` | Menghasilkan audio TTS Bahasa Indonesia (`edge-tts`), menghitung timing per kata (`compute_word_timings`), me-render animasi per-frame (`render_scene_frame_at`), dan menyatukan segmen via FFmpeg menjadi `out/video.mp4`. |
-| `cli.py` | Menyediakan antarmuka baris perintah (`init`, `build`, `beat`, `add`, `status`, `lint`, `map-pages`, `export`, `render`). |
+| `render.py` | Menghasilkan audio TTS Bahasa Indonesia (`edge-tts`), menghitung timing per kata (`compute_word_timings`), me-render komposisi *full-screen* (`render_scene_frame_at` dengan *Ken Burns*, *vignette*, *glassmorphism* `RGBA`, dan subtitle karaoke tanpa kotak kaku), serta menyatukan segmen via FFmpeg menjadi `out/video.mp4`. |
+| `cli.py` | Menyediakan antarmuka baris perintah (`init`, `build`, `beat`, `add`, `status`, `lint`, `map-pages`, `export`, `generate-images`, `render`). |
 
 ---
 
