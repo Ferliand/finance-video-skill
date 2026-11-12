@@ -112,3 +112,19 @@ def test_motion_frames_differ_over_time(ptype, narration, notes, prompt):
     diff = ImageChops.difference(frame_early, frame_late)
     assert diff.getbbox() is not None, f"Frame statis / tidak ada animasi pada page_type={ptype}"
 
+
+def test_fullscreen_background_image_is_composited_edge_to_edge(tmp_path):
+    bg = Image.new("RGB", (1080, 1920), color=(25, 110, 160))
+    scene = Scene(
+        id=1,
+        beat="hook",
+        narration="Menabung dua puluh ribu setiap pagi mengubah masa depanmu.",
+        page_type="illustration",
+        words=compute_word_timings("Menabung dua puluh ribu setiap pagi mengubah masa depanmu.", 3.0),
+    )
+    frame = render_scene_frame_at(scene, t=0.5, duration=3.0, fmt="S", topic="Menabung", bg_image=bg)
+    assert frame.size == (1080, 1920)
+    px = frame.getpixel((20, 40))
+    assert px[2] > px[0], f"Expected blue-dominant full-bleed background at edge, got {px}"
+
+
