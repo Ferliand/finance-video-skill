@@ -19,9 +19,9 @@ def _project(slug: str) -> Project:
 
 
 def cmd_init(a) -> int:
-    p = Project.create(a.slug, a.topic, fmt=a.format, minutes=a.minutes)
-    print(f"Proyek dibuat: {p.root}")
-    print(f"Isi {p.brief_path} (angka_kunci, tokoh, cta, ...) lalu jalankan: build {a.slug}")
+    p = Project.create(a.slug, a.topic, fmt=a.format, minutes=a.minutes, style=a.style)
+    print(f"Proyek dibuat: {p.root} (style: {a.style})")
+    print(f"Isi {p.brief_path} (angka_kunci, tokoh, cta, style, ...) lalu jalankan: build {a.slug}")
     return 0
 
 
@@ -103,7 +103,7 @@ def cmd_export(a) -> int:
     out_md.write_text(workflow.export_markdown(p), encoding="utf-8", newline="\n")
     print(f"Ditulis: {out_md}")
 
-    prompts = workflow.export_prompts(p)
+    prompts = workflow.export_prompts(p, style_override=getattr(a, "style", None))
     out_prompts = p.out_dir / "prompts.json"
     import json
     out_prompts.write_text(json.dumps(prompts, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -115,11 +115,21 @@ def cmd_export(a) -> int:
     return 0
 
 
+def cmd_generate_images(a) -> int:
+    from .image_gen import generate_project_images
+    p = _project(a.slug)
+    style = a.style or p.load_brief().style
+    print(f"Men-generate aset gambar full-screen untuk '{a.slug}' (style: {style})...")
+    paths = generate_project_images(p, style_override=a.style, scene_id=a.scene, force=a.force)
+    print(f"Selesai! {len(paths)} aset gambar siap di: {p.out_dir / 'images'}")
+    return 0
+
+
 def cmd_render(a) -> int:
     from .render import render_project
     p = _project(a.slug)
     print(f"Me-render video untuk proyek '{a.slug}' (suara: {a.voice})...")
-    video_path = render_project(p, voice=a.voice)
+    video_path = render_project(p, voice=a.voice, style_override=getattr(a, "style", None))
     total_dur = sum((s.duration or 0.0) for s in p.load_storyboard().scenes)
     print(f"Selesai! Video dibuat: {video_path} (durasi: {total_dur:.1f} detik)")
     return 0
@@ -137,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("init"); s.add_argument("slug"); s.add_argument("--topic", required=True)
     s.add_argument("--format", choices=["A", "B", "S"], default="B"); s.add_argument("--minutes", type=float, default=10)
+    s.add_argument("--style", default="flat-vector", help="preset atau custom style visual (default: flat-vector)")
     s.set_defaults(fn=cmd_init)
     s = sub.add_parser("build"); s.add_argument("slug"); s.set_defaults(fn=cmd_build)
     s = sub.add_parser("beat"); s.add_argument("slug"); s.add_argument("--beat"); s.set_defaults(fn=cmd_beat)
@@ -149,9 +160,17 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--refs", default="references", help="folder transkrip referensi (*.txt) untuk cek kemiripan")
     s.set_defaults(fn=cmd_lint)
     s = sub.add_parser("map-pages"); s.add_argument("slug"); s.set_defaults(fn=cmd_map_pages)
-    s = sub.add_parser("export"); s.add_argument("slug"); s.set_defaults(fn=cmd_export)
+    s = sub.add_parser("export"); s.add_argument("slug")
+    s.add_argument("--style", default=None, help="override visual style untuk prompts.json")
+    s.set_defaults(fn=cmd_export)
+    s = sub.add_parser("generate-images"); s.add_argument("slug")
+    s.add_argument("--style", default=None, help="preset atau custom style visual")
+    s.add_argument("--scene", type=int, default=None, help="hanya generate ulang nomor scene tertentu")
+    s.add_argument("--force", action="store_true", help="timpa file gambar yang sudah ada")
+    s.set_defaults(fn=cmd_generate_images)
     s = sub.add_parser("render"); s.add_argument("slug")
     s.add_argument("--voice", default="id-ID-ArdiNeural", help="suara edge-tts (default: id-ID-ArdiNeural)")
+    s.add_argument("--style", default=None, help="preset atau custom style visual jika gambar belum dibuat")
     s.set_defaults(fn=cmd_render)
 
     a = ap.parse_args(argv)
