@@ -128,10 +128,13 @@ def cmd_generate_images(a) -> int:
 def cmd_render(a) -> int:
     from .render import render_project
     p = _project(a.slug)
-    print(f"Me-render video untuk proyek '{a.slug}' (suara: {a.voice})...")
-    video_path = render_project(p, voice=a.voice, style_override=getattr(a, "style", None))
+    brief = p.load_brief()
+    style = getattr(a, "style", None) or brief.style
+    fps = getattr(a, "fps", None) or (12 if style.strip().lower() == "claymation" else 15)
+    print(f"Me-render video untuk proyek '{a.slug}' (suara: {a.voice}, fps: {fps})...")
+    video_path = render_project(p, voice=a.voice, fps=fps, style_override=getattr(a, "style", None))
     total_dur = sum((s.duration or 0.0) for s in p.load_storyboard().scenes)
-    print(f"Selesai! Video dibuat: {video_path} (durasi: {total_dur:.1f} detik)")
+    print(f"Selesai! Video dibuat: {video_path} (durasi: {total_dur:.1f} detik, {fps} FPS)")
     return 0
 
 
@@ -171,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("render"); s.add_argument("slug")
     s.add_argument("--voice", default="id-ID-ArdiNeural", help="suara edge-tts (default: id-ID-ArdiNeural)")
     s.add_argument("--style", default=None, help="preset atau custom style visual jika gambar belum dibuat")
+    s.add_argument("--fps", type=int, default=None, help="frame rate render (default: 12 untuk claymation, 15 untuk lainnya)")
     s.set_defaults(fn=cmd_render)
 
     a = ap.parse_args(argv)

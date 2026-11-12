@@ -7,6 +7,7 @@ import pytest
 from vengine import workflow
 from vengine.project import Project
 from vengine.render import (
+    _detect_clay_motion_mode,
     active_word_index,
     compute_word_timings,
     render_project,
@@ -126,5 +127,34 @@ def test_fullscreen_background_image_is_composited_edge_to_edge(tmp_path):
     assert frame.size == (1080, 1920)
     px = frame.getpixel((20, 40))
     assert px[2] > px[0], f"Expected blue-dominant full-bleed background at edge, got {px}"
+
+
+def test_claymation_motion_modes_detect_and_animate():
+    bg_start = Image.new("RGB", (1080, 1920), color=(40, 50, 75))
+    bg_end = Image.new("RGB", (1080, 1920), color=(220, 185, 110))
+
+    s1 = Scene(
+        id=1, beat="hook", narration="Menatap layar HP di kamar redup.",
+        motion_prompt="Stop-motion claymation, slow zoom in toward character's face, soft blue screen light flickering on clay skin, subtle breathing motion",
+    )
+    s2 = Scene(
+        id=2, beat="hook", narration="Baterai merah raksasa melayang di atas kepala.",
+        motion_prompt="Stop-motion claymation, static camera, red battery icon gently bobbing up and down, character sighs and slumps shoulders slightly",
+    )
+    s3 = Scene(
+        id=3, beat="hook", narration="Tangan menekan sakelar lampu hingga ruangan cerah.",
+        motion_prompt="Stop-motion claymation, clay hand flips the switch upward, sudden warm studio light fills the miniature room, crisp tactile motion",
+    )
+
+    assert _detect_clay_motion_mode(s1) == "zoom_flicker"
+    assert _detect_clay_motion_mode(s2) == "bob_and_sigh"
+    assert _detect_clay_motion_mode(s3) == "switch_light"
+
+    for sc, end_img in ((s1, None), (s2, None), (s3, bg_end)):
+        f_early = render_scene_frame_at(sc, t=0.2, duration=3.0, fmt="S", bg_image=bg_start, end_bg_image=end_img)
+        f_late = render_scene_frame_at(sc, t=2.4, duration=3.0, fmt="S", bg_image=bg_start, end_bg_image=end_img)
+        diff = ImageChops.difference(f_early, f_late)
+        assert diff.getbbox() is not None
+
 
 

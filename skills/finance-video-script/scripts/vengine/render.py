@@ -9,7 +9,7 @@ import textwrap
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 from .image_gen import generate_project_images, render_fallback_canvas
 from .page_mapper import map_storyboard_pages
@@ -207,7 +207,140 @@ def _draw_karaoke_subtitle(
             x += ww + space_w
 
 
-# ---------- Full-Screen Ken Burns & Vignette Helpers ----------
+# ---------- Full-Screen Ken Burns, Claymation Stop-Motion & Vignette Helpers ----------
+def _detect_clay_motion_mode(scene: Scene) -> str:
+    """Deteksi mode animasi stop-motion claymation dari motion_prompt atau end_image_file."""
+    mp = (scene.motion_prompt or "").lower()
+    if any(k in mp for k in ("switch", "flip", "illuminat")) or scene.end_image_file or scene.end_image_prompt:
+        return "switch_light"
+    if any(k in mp for k in ("bobbing", "battery", "slump", "sigh")):
+        return "bob_and_sigh"
+    if any(k in mp for k in ("flicker", "screen", "breathing")):
+        return "zoom_flicker"
+    return "ken_burns"
+
+
+def _apply_tilt_shift_dof(img: Image.Image) -> Image.Image:
+    """Terapkan efek lensa makro tilt-shift (blur lembut di tepi atas dan bawah panggung miniatur)."""
+    w, h = img.size
+    blurred = img.filter(ImageFilter.GaussianBlur(radius=4))
+    mask_small = Image.new("L", (1, 128), 0)
+    for i in range(128):
+        yn = i / 127.0
+        if yn < 0.11:
+            a = int(210 * ((1.0 - yn / 0.11) ** 1.5))
+        elif yn > 0.89:
+            a = int(210 * (((yn - 0.89) / 0.11) ** 1.5))
+        else:
+            a = 0
+        mask_small.putpixel((0, i), _clamp_int(a))
+    mask = mask_small.resize((w, h), Image.Resampling.BILINEAR)
+    return Image.composite(blurred, img, mask)
+
+
+def _apply_clay_stop_motion(
+    raw_bg: Image.Image,
+    end_bg: Image.Image | None,
+    scene: Scene,
+    width: int,
+    height: int,
+    t: float,
+    duration: float,
+) -> Image.Image:
+    """Render gerak stop-motion 12 FPS (stepped cadence 'on twos', flicker, bobbing, atau switch light)."""
+    if raw_bg.size != (width, height):
+        raw_bg = raw_bg.resize((width, height), Image.Resampling.BILINEAR)
+    if end_bg is not None and end_bg.size != (width, height):
+        end_bg = end_bg.resize((width, height), Image.Resampling.BILINEAR)
+
+    mode = _detect_clay_motion_mode(scene)
+    # Kuantisasi waktu ke 6 pose/detik ('on twos' pada 12 FPS) agar terasa patah-patah organik khas claymation
+    pose_idx = int(t * 6.0)
+    t_step = pose_idx / 6.0
+    p_step = _clamp(t_step / max(0.1, duration))
+
+    # Micro-jitter taktil khas pemotretan stop-motion fisik (±2 px)
+    jx = ((pose_idx * 37 + scene.id * 13) % 5) - 2
+    jy = ((pose_idx * 53 + scene.id * 29) % 5) - 2
+
+    if mode == "zoom_flicker":
+        # Slow push-in ke wajah karakter + gerak napas mikro + kedipan cahaya biru layar HP
+        zoom = 1.0 + 0.12 * p_step
+        breath = 1.0 + 0.012 * math.sin(pose_idx * 1.2)
+        crop_w = max(1, int(width / zoom))
+        crop_h = max(1, int(height / (zoom * breath)))
+        cx_off = _clamp(0.5 + (jx / width), 0.0, 1.0)
+        cy_off = _clamp(0.42 + (jy / height), 0.0, 1.0)
+        px = int((width - crop_w) * cx_off)
+        py = int((height - crop_h) * cy_off)
+        frame = raw_bg.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BILINEAR)
+
+        # Efek soft blue screen light flickering di wajah & tubuh tanah liat
+        flicker_intensity = 0.55 + 0.45 * math.sin(pose_idx * 2.3 + 0.7)
+        glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        g_draw = ImageDraw.Draw(glow)
+        gx, gy = width // 2, int(height * 0.52)
+        for rad_f, base_a in ((0.46, 38), (0.30, 62), (0.18, 88)):
+            rad = int(min(width, height) * rad_f)
+            a = _clamp_int(int(base_a * flicker_intensity))
+            g_draw.ellipse([gx - rad, gy - rad, gx + rad, gy + rad], fill=(65, 165, 255, a))
+        out = Image.alpha_composite(frame.convert("RGBA"), glow).convert("RGB")
+        return _apply_tilt_shift_dof(out)
+
+    if mode == "bob_and_sigh":
+        # Kamera statis + ikon baterai merah di bagian atas memantul naik-turun + bahu karakter sedikit turun (sigh)
+        base = raw_bg.copy()
+        # 1) Bobbing halus pada zona ikon di atas kepala (y: 0.06..0.44)
+        bob_dy = int(math.sin(pose_idx * 1.4) * 22)
+        icon_shifted = ImageChops.offset(base, jx, bob_dy)
+        icon_mask = Image.new("L", (width, height), 0)
+        m_draw = ImageDraw.Draw(icon_mask)
+        m_draw.ellipse(
+            [int(width * 0.14), int(height * 0.05), int(width * 0.86), int(height * 0.44)],
+            fill=255,
+        )
+        icon_mask = icon_mask.filter(ImageFilter.GaussianBlur(radius=28))
+        composed = Image.composite(icon_shifted, base, icon_mask)
+
+        # 2) Bahu & kepala karakter sedikit turun saat menghela napas (y: 0.45..0.86)
+        slump_p = _ease_out_cubic(_clamp((p_step - 0.20) / 0.65))
+        slump_dy = int(slump_p * 16) + jy
+        body_shifted = ImageChops.offset(composed, jx, slump_dy)
+        body_mask = Image.new("L", (width, height), 0)
+        b_draw = ImageDraw.Draw(body_mask)
+        b_draw.ellipse(
+            [int(width * 0.16), int(height * 0.45), int(width * 0.84), int(height * 0.86)],
+            fill=230,
+        )
+        body_mask = body_mask.filter(ImageFilter.GaussianBlur(radius=32))
+        composed = Image.composite(body_shifted, composed, body_mask)
+        return _apply_tilt_shift_dof(composed)
+
+    if mode == "switch_light":
+        # Transisi Start Frame (redup, tangan menekan sakelar) -> End Frame (sakelar terangkat, cahaya studio hangat)
+        dim_start = ImageEnhance.Brightness(raw_bg).enhance(0.72)
+        bright_end = end_bg if end_bg is not None else ImageEnhance.Brightness(raw_bg).enhance(1.28)
+        flip_p = _clamp((p_step - 0.42) / 0.22)
+        if flip_p <= 0.0:
+            # Tangan bergerak mikro mendekati sakelar sebelum klik
+            pre_dy = int(-p_step * 18) + jy
+            frame = ImageChops.offset(dim_start, jx, pre_dy)
+        else:
+            blended = Image.blend(dim_start, bright_end, flip_p)
+            frame = ImageChops.offset(blended, jx, jy)
+            # Warm studio light bloom menyebar memenuhi ruangan miniatur
+            bloom = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            bl_draw = ImageDraw.Draw(bloom)
+            bloom_intensity = _ease_out_cubic(flip_p)
+            bx, by = width // 2, int(height * 0.38)
+            for rad_f, base_a in ((0.65, 48), (0.42, 75), (0.24, 95)):
+                rad = int(max(width, height) * rad_f)
+                a = _clamp_int(int(base_a * bloom_intensity))
+                bl_draw.ellipse([bx - rad, by - rad, bx + rad, by + rad], fill=(255, 220, 130, a))
+            frame = Image.alpha_composite(frame.convert("RGBA"), bloom).convert("RGB")
+        return _apply_tilt_shift_dof(frame)
+
+    return _apply_fullscreen_ken_burns(raw_bg, width=width, height=height, p=p_step, scene_id=scene.id)
 def _apply_fullscreen_ken_burns(
     bg: Image.Image,
     width: int,
@@ -316,6 +449,25 @@ def _resolve_scene_bg(
     return render_fallback_canvas(scene, width=width, height=height)
 
 
+def _resolve_scene_end_bg(
+    scene: Scene,
+    width: int,
+    height: int,
+    end_bg_image: Image.Image | None,
+) -> Image.Image | None:
+    if end_bg_image is not None:
+        return end_bg_image.convert("RGB")
+    if scene.end_image_file:
+        p = Path(scene.end_image_file)
+        if p.exists():
+            try:
+                with Image.open(p) as im:
+                    return im.convert("RGB")
+            except Exception:
+                pass
+    return None
+
+
 # ---------- Core Animated Full-Screen Frame Renderer ----------
 def render_scene_frame_at(
     scene: Scene,
@@ -324,8 +476,9 @@ def render_scene_frame_at(
     fmt: str = "B",
     topic: str = "",
     bg_image: Image.Image | None = None,
+    end_bg_image: Image.Image | None = None,
 ) -> Image.Image:
-    """Render satu frame Image full-screen pada waktu t (detik) dengan Ken Burns & glassmorphism RGBA."""
+    """Render satu frame Image full-screen pada waktu t (detik) dengan Ken Burns / Clay Stop-Motion & glassmorphism RGBA."""
     duration = max(0.5, duration)
     t = _clamp(t, 0.0, duration)
     p = t / duration
@@ -335,9 +488,15 @@ def render_scene_frame_at(
     width, height = (1080, 1920) if is_vertical else (1920, 1080)
     ptype = scene.page_type or "illustration"
 
-    # 1. Layer Dasar: Full-Screen AI Image + Ken Burns Zoom/Pan
+    # 1. Layer Dasar: Full-Screen AI Image + Clay Stop-Motion atau Ken Burns
     raw_bg = _resolve_scene_bg(scene, width=width, height=height, bg_image=bg_image)
-    zoomed_bg = _apply_fullscreen_ken_burns(raw_bg, width=width, height=height, p=p, scene_id=scene.id)
+    raw_end_bg = _resolve_scene_end_bg(scene, width=width, height=height, end_bg_image=end_bg_image)
+    if scene.motion_prompt or raw_end_bg is not None:
+        zoomed_bg = _apply_clay_stop_motion(
+            raw_bg, raw_end_bg, scene, width=width, height=height, t=t, duration=duration
+        )
+    else:
+        zoomed_bg = _apply_fullscreen_ken_burns(raw_bg, width=width, height=height, p=p, scene_id=scene.id)
 
     # 2. Layer Vignette Sinematik (gelap di bawah untuk subtitle, redup halus di tengah untuk kartu overlay)
     needs_center_dim = ptype in (
@@ -573,10 +732,13 @@ def render_scene_frame(
     t: float = 1.0,
     duration: float = 3.0,
     bg_image: Image.Image | None = None,
+    end_bg_image: Image.Image | None = None,
 ) -> Path:
     """Simpan satu snapshot PNG dari scene (default pada t=1.0 dtk untuk thumbnail/pratinjau)."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    img = render_scene_frame_at(scene, t=t, duration=duration, fmt=fmt, topic=topic, bg_image=bg_image)
+    img = render_scene_frame_at(
+        scene, t=t, duration=duration, fmt=fmt, topic=topic, bg_image=bg_image, end_bg_image=end_bg_image
+    )
     img.save(out_path, format="PNG")
     return out_path
 
@@ -624,6 +786,7 @@ def _render_animated_segment(
     topic: str,
     fps: int = 15,
     bg_image: Image.Image | None = None,
+    end_bg_image: Image.Image | None = None,
 ) -> None:
     """Pipe rangkaian frame animasi RGB langsung ke FFmpeg untuk menghasilkan segmen MP4 yang bergerak halus."""
     is_vertical = fmt == "S"
@@ -655,7 +818,7 @@ def _render_animated_segment(
         for f_idx in range(total_frames):
             t = f_idx / fps
             frame_img = render_scene_frame_at(
-                scene, t=t, duration=duration, fmt=fmt, topic=topic, bg_image=bg_image
+                scene, t=t, duration=duration, fmt=fmt, topic=topic, bg_image=bg_image, end_bg_image=end_bg_image
             )
             proc.stdin.write(frame_img.tobytes())
         proc.stdin.close()
@@ -723,6 +886,13 @@ def render_project(
                 with Image.open(img_p) as loaded:
                     bg_img = loaded.convert("RGB")
 
+        end_bg_img: Image.Image | None = None
+        if s.end_image_file:
+            end_p = project.root / s.end_image_file
+            if end_p.exists():
+                with Image.open(end_p) as loaded_end:
+                    end_bg_img = loaded_end.convert("RGB")
+
         spoken = s.tts_text or s.narration
         dur = synth(spoken, audio_path, voice)
         s.duration = round(dur, 3)
@@ -736,6 +906,7 @@ def render_project(
             t=s.duration * 0.6,
             duration=s.duration,
             bg_image=bg_img,
+            end_bg_image=end_bg_img,
         )
         s.audio_file = str(audio_path.relative_to(project.root))
 
@@ -749,6 +920,7 @@ def render_project(
             topic=brief.topik,
             fps=fps,
             bg_image=bg_img,
+            end_bg_image=end_bg_img,
         )
         segment_files.append(seg_path)
 
