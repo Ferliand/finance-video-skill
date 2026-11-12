@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -20,6 +21,11 @@ from .schema import Scene, StoryBible
 NEGATIVE_SUFFIX = "no text, no letters, no numbers, no watermark, clean composition"
 
 STYLE_PRESETS: dict[str, str] = {
+    "claymation": (
+        "3D claymation style, handmade plasticine polymer clay texture with subtle fingerprints and sculpt tool marks, "
+        "matte finish, miniature 15cm diorama set, soft diffused studio softbox lighting, gentle contact shadows, "
+        "tilt-shift macro photography, shallow depth of field, chunky rounded silhouettes, pastel matte color palette, clean solid background"
+    ),
     "flat-vector": "modern flat vector illustration, warm editorial palette, soft gradients, atmospheric lighting, minimal facial detail",
     "3d-pixar": "3D Pixar Disney style render, Octane render, soft global illumination, warm cinematic lighting, expressive stylized environment",
     "anime-ghibli": "Studio Ghibli inspired anime background art, hand-painted gouache texture, lush warm lighting, cozy atmospheric detail",
@@ -77,11 +83,18 @@ def _auto_visual_description(scene: Scene, brief: Brief) -> str:
     return f"{base_desc}, {mood_desc}"
 
 
+def clean_prompt_flags(text: str) -> str:
+    """Bersihkan flag bergaya CLI/Midjourney (mis. --ar 9:16, --v 6) agar Flux tidak merender angka rasio sebagai teks."""
+    cleaned = re.sub(r"--[a-zA-Z]+\s+\S+", "", text or "")
+    return re.sub(r"\s+", " ", cleaned).strip(" ,")
+
+
 def build_scene_prompt(
     scene: Scene,
     brief: Brief,
     bible: StoryBible,
     style_override: str | None = None,
+    prompt_override: str | None = None,
 ) -> str:
     """Gabungkan style prefix, descriptor tokoh, deskripsi visual scene, dan akhiran negatif."""
     style_prefix = resolve_style_prefix(style_override or brief.style)
@@ -90,7 +103,8 @@ def build_scene_prompt(
     for cid in scene.characters:
         if cid in char_desc and char_desc[cid]:
             parts.append(char_desc[cid])
-    visual = (scene.image_prompt or "").strip() or _auto_visual_description(scene, brief)
+    raw_visual = prompt_override if prompt_override is not None else (scene.image_prompt or "")
+    visual = clean_prompt_flags(raw_visual) or _auto_visual_description(scene, brief)
     parts.append(visual)
     mood_hint = _MOOD_ATMOSPHERE.get(scene.mood)
     if mood_hint and mood_hint not in visual:
@@ -248,14 +262,28 @@ def generate_project_images(
         if scene_id is not None and s.id != scene_id:
             continue
         should_generate = force or (scene_id == s.id) or (not img_path.exists())
+        seed = _compute_seed(project.slug, s.id)
         if should_generate:
             if fetcher is None and net_count > 0:
                 time.sleep(4.5)
             prompt = build_scene_prompt(s, brief, bible, style_override=style_override)
-            seed = _compute_seed(project.slug, s.id)
             generate_scene_image(s, prompt, img_path, width=width, height=height, seed=seed, fetcher=fetcher)
             net_count += 1
         generated_paths.append(img_path)
+
+        if s.end_image_prompt:
+            end_path = images_dir / f"scene_{s.id:03d}_end.png"
+            s.end_image_file = str(end_path.relative_to(project.root))
+            should_gen_end = force or (scene_id == s.id) or (not end_path.exists())
+            if should_gen_end:
+                if fetcher is None and net_count > 0:
+                    time.sleep(4.5)
+                end_prompt = build_scene_prompt(
+                    s, brief, bible, style_override=style_override, prompt_override=s.end_image_prompt
+                )
+                generate_scene_image(s, end_prompt, end_path, width=width, height=height, seed=seed, fetcher=fetcher)
+                net_count += 1
+            generated_paths.append(end_path)
 
     sb.style_prefix = resolve_style_prefix(style_override or brief.style)
     project.save_storyboard(sb)

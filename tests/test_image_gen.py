@@ -122,3 +122,44 @@ def test_generate_project_images_caches_and_supports_scene_filter_and_fallback(t
     with Image.open(fallback_out) as im:
         assert im.size == (1080, 1920)
 
+
+def test_claymation_preset_strips_ar_flags_and_generates_end_frame(tmp_path):
+    assert "claymation" in STYLE_PRESETS
+    assert "plasticine" in STYLE_PRESETS["claymation"]
+    assert "tilt-shift" in STYLE_PRESETS["claymation"]
+
+    p = Project.create("uji-clay", "Hook Claymation", fmt="S", minutes=0.5, base=tmp_path, style="claymation")
+    workflow.build(p)
+    items = [
+        {
+            "narration": "Tangan tanah liat menekan sakelar lampu hingga ruangan menjadi cerah.",
+            "tags": ["BRIDGE"],
+            "image_prompt": "Macro shot of a chunky clay hand flipping a miniature yellow light switch on a wall --ar 9:16",
+            "end_image_prompt": "Macro shot of a chunky clay hand on a flipped yellow light switch, warm bright light illuminating the miniature room --ar 9:16",
+            "motion_prompt": "Stop-motion claymation, clay hand flips the switch upward, sudden warm studio light fills the miniature room",
+        }
+    ]
+    workflow.add_scenes(p, "hook", items, force=True)
+    sb = p.load_storyboard()
+    s1 = sb.scenes[0]
+    assert s1.motion_prompt is not None
+    assert s1.end_image_prompt is not None
+
+    built_prompt = build_scene_prompt(s1, p.load_brief(), p.load_bible())
+    assert "--ar 9:16" not in built_prompt
+    assert "plasticine" in built_prompt
+
+    calls = []
+
+    def fake_fetcher(url: str) -> bytes:
+        calls.append(url)
+        return _fake_png_bytes()
+
+    generate_project_images(p, fetcher=fake_fetcher)
+    assert len(calls) == 2  # Start frame + End frame
+    sb_after = p.load_storyboard()
+    assert sb_after.scenes[0].image_file is not None
+    assert sb_after.scenes[0].end_image_file is not None
+    assert (p.root / sb_after.scenes[0].end_image_file).exists()
+
+

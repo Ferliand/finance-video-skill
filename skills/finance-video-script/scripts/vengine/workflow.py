@@ -123,6 +123,8 @@ def parse_scenes(items: list[dict], beat: Beat, bible: StoryBible) -> tuple[list
             narration=str(it.get("narration", "")).strip(),
             tags=tags, notes=str(it.get("notes") or ""),
             image_prompt=it.get("image_prompt") or None,
+            end_image_prompt=it.get("end_image_prompt") or None,
+            motion_prompt=it.get("motion_prompt") or None,
             characters=chars,
             mood=it.get("mood") if it.get("mood") in MOODS else beat.mood,
         ))
@@ -202,13 +204,20 @@ def export_prompts(project: Project, style_override: str | None = None) -> list[
     out = []
     for s in sb.scenes:
         full_prompt = build_scene_prompt(s, brief, bible, style_override=style_override)
-        out.append({
+        entry = {
             "scene_id": s.id,
             "beat": s.beat,
             "page_type": s.page_type or "illustration",
             "prompt": full_prompt,
             "characters": s.characters,
-        })
+        }
+        if s.end_image_prompt:
+            entry["end_prompt"] = build_scene_prompt(
+                s, brief, bible, style_override=style_override, prompt_override=s.end_image_prompt
+            )
+        if s.motion_prompt:
+            entry["motion_prompt"] = s.motion_prompt
+        out.append(entry)
     return out
 
 

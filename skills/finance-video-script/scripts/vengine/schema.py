@@ -84,6 +84,8 @@ class Scene(BaseModel):
     tags: list[Tag] = Field(default_factory=list)
     notes: str = ""                      # rumus hitungan & sumber klaim
     image_prompt: str | None = None      # bahasa Inggris, tanpa teks di dalam gambar
+    end_image_prompt: str | None = None  # opsional: keyframe akhir untuk transisi Start -> End Frame
+    motion_prompt: str | None = None     # instruksi gerak per scene (stop-motion / I2V)
     characters: list[str] = Field(default_factory=list)
     mood: Mood = "neutral"
     # diisi page mapper (lihat docs/design-video.md)
@@ -95,6 +97,7 @@ class Scene(BaseModel):
     # diisi tahap berikutnya
     audio_file: str | None = None
     image_file: str | None = None
+    end_image_file: str | None = None
     duration: float | None = None
     words: list[WordTiming] = Field(default_factory=list)
 
