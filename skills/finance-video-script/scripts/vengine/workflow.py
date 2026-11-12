@@ -193,25 +193,22 @@ def export_markdown(project: Project) -> str:
 STYLE_PREFIX = "flat vector illustration, warm palette, soft shadows, minimal detail, no text"
 
 
-def export_prompts(project: Project) -> list[dict]:
+def export_prompts(project: Project, style_override: str | None = None) -> list[dict]:
+    from .image_gen import build_scene_prompt
+
     sb = project.load_storyboard()
+    brief = project.load_brief()
     bible = project.load_bible()
-    char_desc = {c.id: c.descriptor for c in bible.characters}
     out = []
     for s in sb.scenes:
-        if s.image_prompt:
-            parts = [STYLE_PREFIX]
-            for cid in s.characters:
-                if cid in char_desc and char_desc[cid]:
-                    parts.append(char_desc[cid])
-            parts.append(s.image_prompt)
-            full_prompt = ", ".join(parts)
-            out.append({
-                "scene_id": s.id,
-                "beat": s.beat,
-                "prompt": full_prompt,
-                "characters": s.characters,
-            })
+        full_prompt = build_scene_prompt(s, brief, bible, style_override=style_override)
+        out.append({
+            "scene_id": s.id,
+            "beat": s.beat,
+            "page_type": s.page_type or "illustration",
+            "prompt": full_prompt,
+            "characters": s.characters,
+        })
     return out
 
 

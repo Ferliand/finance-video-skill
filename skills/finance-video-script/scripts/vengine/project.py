@@ -51,14 +51,15 @@ class Project:
 
     @classmethod
     def create(cls, slug: str, topic: str, fmt: str = "B", minutes: float = 10,
-               base: Path | None = None) -> "Project":
+               base: Path | None = None, style: str = "flat-vector") -> "Project":
         p = cls(slug, base)
         if p.exists():
             raise FileExistsError(f"Proyek '{slug}' sudah ada: {p.root}")
         text = TEMPLATE.read_text(encoding="utf-8")
         text = (text.replace("{{topik}}", json.dumps(topic, ensure_ascii=False))
                     .replace("{{format}}", fmt)
-                    .replace("{{durasi}}", str(minutes)))
+                    .replace("{{durasi}}", str(minutes))
+                    .replace("{{style}}", json.dumps(style or "flat-vector", ensure_ascii=False)))
         atomic_write(p.brief_path, text)
         try:
             load_brief(p.brief_path)                  # validasi dini (format/durasi salah)

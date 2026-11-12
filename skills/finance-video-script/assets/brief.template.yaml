@@ -1,7 +1,8 @@
 # Brief video. Isi sebelum menjalankan `build`. Jangan mengarang angka_kunci: isi dari pengguna.
 topik: {{topik}}
-format: {{format}}            # A = cerita bertokoh, B = panduan langkah bernomor
-durasi_menit: {{durasi}}      # 1-30
+format: {{format}}            # A = cerita bertokoh, B = panduan langkah bernomor, S = short-form
+durasi_menit: {{durasi}}      # 0.5-30
+style: {{style}}              # flat-vector | 3d-pixar | anime-ghibli | cinematic-realistic | watercolor | comic-book | dark-moody | custom prompt
 audiens_spesifik: ""          # mis. "ojol dan pedagang kecil"
 angka_kunci: {}               # variabel; semua angka di naskah harus punya dasar. Contoh (ganti {} dengan):
   # angka_kunci:
