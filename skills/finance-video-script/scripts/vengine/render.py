@@ -311,51 +311,51 @@ def _apply_clay_stop_motion(
         return _apply_tilt_shift_dof(out)
 
     if mode == "bob_and_sigh":
-        # Kamera statis + ikon baterai merah di bagian atas memantul naik-turun + bahu karakter sedikit turun (sigh)
+        # Kamera statis + ikon baterai merah (zona atas y < 0.27) memantul utuh + tubuh/kepala (y > 0.29) turun halus
         base = raw_bg.copy()
-        bob_dy = int(math.sin(pose_idx * 1.4) * 22)
+        bob_dy = int(math.sin(pose_idx * 1.4) * 18)
         icon_shifted = ImageChops.offset(base, jx, bob_dy)
-        icon_mask = Image.new("L", (width, height), 0)
-        m_draw = ImageDraw.Draw(icon_mask)
-        m_draw.ellipse(
-            [int(width * 0.14), int(height * 0.05), int(width * 0.86), int(height * 0.44)],
-            fill=255,
-        )
-        icon_mask = icon_mask.filter(ImageFilter.GaussianBlur(radius=36))
-        composed = Image.composite(icon_shifted, base, icon_mask)
 
         slump_p = _ease_out_cubic(_clamp((p_step - 0.20) / 0.65))
-        slump_dy = int(slump_p * 16) + jy
-        body_shifted = ImageChops.offset(composed, jx, slump_dy)
-        body_mask = Image.new("L", (width, height), 0)
-        b_draw = ImageDraw.Draw(body_mask)
-        b_draw.ellipse(
-            [int(width * 0.16), int(height * 0.45), int(width * 0.84), int(height * 0.86)],
-            fill=230,
-        )
-        body_mask = body_mask.filter(ImageFilter.GaussianBlur(radius=40))
-        composed = Image.composite(body_shifted, composed, body_mask)
+        slump_dy = int(slump_p * 14) + jy
+        body_shifted = ImageChops.offset(base, jx, slump_dy)
+
+        # Mask vertikal ber-feather di celah kosong antara baterai dan rambut (y = 0.26..0.30) agar objek utuh
+        band_small = Image.new("L", (1, 256), 0)
+        for i in range(256):
+            yn = i / 255.0
+            if yn < 0.03:
+                a = int(255 * (yn / 0.03))
+            elif yn <= 0.26:
+                a = 255
+            elif yn < 0.30:
+                a = int(255 * (1.0 - (yn - 0.26) / 0.04))
+            else:
+                a = 0
+            band_small.putpixel((0, i), _clamp_int(a))
+        icon_mask = band_small.resize((width, height), Image.Resampling.BILINEAR)
+        composed = Image.composite(icon_shifted, body_shifted, icon_mask)
         return _apply_tilt_shift_dof(composed)
 
     if mode == "switch_light":
-        # Transisi Start Frame (redup, tangan menekan sakelar) -> End Frame (sakelar terangkat, cahaya studio hangat)
-        dim_start = ImageEnhance.Brightness(raw_bg).enhance(0.68)
+        # Transisi taktil Start Frame (redup, sakelar bawah) -> End Frame (sakelar atas, cahaya studio hangat)
+        dim_start = raw_bg if end_bg is not None else ImageEnhance.Brightness(raw_bg).enhance(0.68)
         bright_end = end_bg if end_bg is not None else ImageEnhance.Brightness(raw_bg).enhance(1.25)
-        flip_p = _clamp((p_step - 0.42) / 0.22)
+        flip_p = _clamp((p_step - 0.34) / 0.10)
         if flip_p <= 0.0:
-            pre_dy = int(-p_step * 16) + jy
+            pre_dy = int(-p_step * 10) + jy
             frame = ImageChops.offset(dim_start, jx, pre_dy)
         else:
             blended = Image.blend(dim_start, bright_end, flip_p)
             frame = ImageChops.offset(blended, jx, jy)
-            bloom_intensity = _ease_out_cubic(flip_p)
+            warm_pulse = 0.65 + 0.35 * (0.5 + 0.5 * math.sin(pose_idx * 1.5))
             bloom = _make_smooth_radial_glow(
                 width,
                 height,
-                center_xy=(0.5, 0.36),
+                center_xy=(0.45, 0.42),
                 color=(255, 220, 130),
-                max_alpha=int(90 * bloom_intensity),
-                radius_scale=0.72,
+                max_alpha=int(48 * flip_p * warm_pulse),
+                radius_scale=0.68,
             )
             frame = Image.alpha_composite(frame.convert("RGBA"), bloom).convert("RGB")
         return _apply_tilt_shift_dof(frame)

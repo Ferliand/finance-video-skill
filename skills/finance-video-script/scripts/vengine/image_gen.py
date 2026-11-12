@@ -128,7 +128,7 @@ def build_pollinations_url(
     encoded = urllib.parse.quote(prompt, safe="")
     return (
         f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width={width}&height={height}&seed={seed}&model={model}&nologo=true&enhance=true"
+        f"?width={width}&height={height}&seed={seed}&model={model}&nologo=true&enhance=false"
     )
 
 

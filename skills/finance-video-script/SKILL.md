@@ -35,7 +35,9 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
    - `video-projects/<slug>/out/naskah.md` (naskah kanonik per babak)
    - `video-projects/<slug>/out/prompts.json` (prompt ilustrasi *full-screen* siap generate untuk seluruh scene lengkap dengan karakter & style)
    - `video-projects/<slug>/out/naskah.srt` (subtitle ber-timestamp)
-8. **Generate Aset Gambar AI Full-Screen.** Jalankan `generate-images <slug>` (bisa tambah `--style <style>`, `--scene <nomor>` untuk mengulang satu scene, atau `--force` untuk menimpa semua) untuk mengunduh gambar AI *full-screen* (Pollinations Flux) ke `video-projects/<slug>/out/images/scene_XXX.png`.
+8. **Generate Aset Gambar AI Full-Screen.**
+   - **Prioritas Utama (di dalam Agen):** Jika agen memiliki subagent/tool `image-generator` bawaan (Google Imagen / Gemini Image), **wajib gunakan `image-generator`** untuk men-generate gambar dari `video-projects/<slug>/out/prompts.json` langsung ke `video-projects/<slug>/out/images/scene_XXX.png` (serta `scene_XXX_end.png` jika ada `end_prompt`), lalu jalankan `generate-images <slug>` tanpa `--force` untuk menautkan path `image_file` di `storyboard.json`.
+   - **Alternatif CLI mandiri:** Jalankan `generate-images <slug>` (bisa tambah `--style <style>`, `--scene <nomor>`, atau `--force`) untuk mengunduh gambar via endpoint CLI ke `video-projects/<slug>/out/images/scene_XXX.png`.
 9. **Render Video MP4 (opsional/jika diminta).** Jalankan `render <slug>` (bisa tambah `--voice id-ID-ArdiNeural` atau `id-ID-GadisNeural`, serta `--fps 12` untuk gaya stop-motion `claymation`) untuk menggabungkan gambar latar *full-screen* (dengan gerak *stop-motion* / *Ken Burns*, *vignette*, overlay *glassmorphism* angka/punchline, dan subtitle karaoke), audio voiceover Bahasa Indonesia, menjadi `video-projects/<slug>/out/video.mp4`.
 
 ## Format JSON scene
