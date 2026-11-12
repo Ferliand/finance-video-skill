@@ -115,9 +115,9 @@ def build_pollinations_url(
 
 
 def _default_fetcher(url: str) -> bytes:
-    """Unduh bytes gambar dari URL dengan retry eksponensial ringan."""
+    """Unduh bytes gambar dari URL dengan retry yang menghormati rate-limit Pollinations."""
     last_err: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             req = urllib.request.Request(
                 url,
@@ -127,8 +127,8 @@ def _default_fetcher(url: str) -> bytes:
                 return resp.read()
         except Exception as e:
             last_err = e
-            if attempt < 2:
-                time.sleep(2.0 * (attempt + 1))
+            if attempt < 3:
+                time.sleep(5.0 * (attempt + 1))
     assert last_err is not None
     raise last_err
 
@@ -250,7 +250,7 @@ def generate_project_images(
         should_generate = force or (scene_id == s.id) or (not img_path.exists())
         if should_generate:
             if fetcher is None and net_count > 0:
-                time.sleep(1.5)
+                time.sleep(4.5)
             prompt = build_scene_prompt(s, brief, bible, style_override=style_override)
             seed = _compute_seed(project.slug, s.id)
             generate_scene_image(s, prompt, img_path, width=width, height=height, seed=seed, fetcher=fetcher)

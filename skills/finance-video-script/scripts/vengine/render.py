@@ -552,7 +552,7 @@ def render_scene_frame_at(
         cta_sample = "Hari ke-1"
         typed_len = max(1, int(len(cta_sample) * _clamp(p * 1.6)))
         cursor_char = "|" if int(t * 4) % 2 == 0 else " "
-        typed_str = f"💬  {cta_sample[:typed_len]}{cursor_char}"
+        typed_str = f">  {cta_sample[:typed_len]}{cursor_char}"
         _draw_text_with_shadow(draw, (margin_x + 80, input_y1 + 24), typed_str, _load_font(44, bold=True), ACCENT)
 
         _draw_karaoke_subtitle(draw, scene, t, duration, width, height, is_vertical)
