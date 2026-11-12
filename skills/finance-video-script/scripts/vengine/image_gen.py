@@ -110,25 +110,25 @@ def build_pollinations_url(
     encoded = urllib.parse.quote(prompt, safe="")
     return (
         f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width={width}&height={height}&seed={seed}&model={model}&nologo=true"
+        f"?width={width}&height={height}&seed={seed}&model={model}&nologo=true&enhance=true"
     )
 
 
 def _default_fetcher(url: str) -> bytes:
-    """Unduh bytes gambar dari URL dengan retry ringan."""
+    """Unduh bytes gambar dari URL dengan retry eksponensial ringan."""
     last_err: Exception | None = None
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             req = urllib.request.Request(
                 url,
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) vengine/1.0"},
             )
-            with urllib.request.urlopen(req, timeout=35) as resp:
+            with urllib.request.urlopen(req, timeout=45) as resp:
                 return resp.read()
         except Exception as e:
             last_err = e
-            if attempt == 0:
-                time.sleep(1.0)
+            if attempt < 2:
+                time.sleep(2.0 * (attempt + 1))
     assert last_err is not None
     raise last_err
 
@@ -192,6 +192,12 @@ def generate_scene_image(
         raw = fetch(url)
         with Image.open(io.BytesIO(raw)) as im:
             rgb = im.convert("RGB")
+            iw, ih = rgb.size
+            # Potong 4% tepi bawah/samping untuk memastikan bebas badge sudut, lalu resize ke ukuran penuh
+            if iw >= 200 and ih >= 200:
+                mx = int(iw * 0.02)
+                my_bot = int(ih * 0.045)
+                rgb = rgb.crop((mx, 0, iw - mx, ih - my_bot))
             if rgb.size != (width, height):
                 rgb = rgb.resize((width, height), Image.Resampling.LANCZOS)
             rgb.save(out_path, format="PNG")
@@ -235,6 +241,7 @@ def generate_project_images(
     images_dir.mkdir(parents=True, exist_ok=True)
 
     generated_paths: list[Path] = []
+    net_count = 0
     for s in sb.scenes:
         img_path = images_dir / f"scene_{s.id:03d}.png"
         s.image_file = str(img_path.relative_to(project.root))
@@ -242,9 +249,12 @@ def generate_project_images(
             continue
         should_generate = force or (scene_id == s.id) or (not img_path.exists())
         if should_generate:
+            if fetcher is None and net_count > 0:
+                time.sleep(1.5)
             prompt = build_scene_prompt(s, brief, bible, style_override=style_override)
             seed = _compute_seed(project.slug, s.id)
             generate_scene_image(s, prompt, img_path, width=width, height=height, seed=seed, fetcher=fetcher)
+            net_count += 1
         generated_paths.append(img_path)
 
     sb.style_prefix = resolve_style_prefix(style_override or brief.style)

@@ -73,7 +73,7 @@ def test_build_pollinations_url_encodes_parameters():
     url = build_pollinations_url("warm flat vector, jar of coins", 1080, 1920, seed=4242)
     assert "image.pollinations.ai/prompt/" in url
     assert "width=1080" in url and "height=1920" in url
-    assert "seed=4242" in url and "model=flux" in url and "nologo=true" in url
+    assert "seed=4242" in url and "model=flux" in url and "nologo=true" in url and "enhance=true" in url
 
 
 def test_generate_project_images_caches_and_supports_scene_filter_and_fallback(tmp_path):
