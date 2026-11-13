@@ -966,6 +966,90 @@ def _render_animated_segment(
         raise RuntimeError(f"FFmpeg gagal pada scene {scene.id}: {err_msg}")
 
 
+def split_full_audio_to_scenes(
+    ffmpeg_exe: str,
+    full_audio_path: Path,
+    scenes: list[Scene],
+    audio_dir: Path,
+) -> list[Path]:
+    """Potong otomatis 1 file MP3 utuh (mis. hasil ElevenLabs) menjadi out/audio/scene_XXX.mp3 berdasarkan deteksi jeda."""
+    total_dur = _probe_audio_duration(full_audio_path)
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    n = len(scenes)
+    if n == 1:
+        dst = audio_dir / f"scene_{scenes[0].id:03d}.mp3"
+        dst.write_bytes(full_audio_path.read_bytes())
+        return [dst]
+
+    proc = subprocess.run(
+        [ffmpeg_exe, "-i", str(full_audio_path), "-af", "silencedetect=noise=-32dB:d=0.22", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    starts = [float(x) for x in re.findall(r"silence_start:\s*([0-9.]+)", proc.stderr)]
+    ends = [float(x) for x in re.findall(r"silence_end:\s*([0-9.]+)", proc.stderr)]
+    silences = [
+        (s, e)
+        for s, e in zip(starts, ends)
+        if s > 0.25 and e < total_dur - 0.20
+    ]
+
+    word_counts = [max(1, len((sc.narration or "").split())) for sc in scenes]
+    total_words = sum(word_counts)
+    cum = 0
+    split_points: list[float] = [0.0]
+    used_indices: set[int] = set()
+    for idx in range(n - 1):
+        cum += word_counts[idx]
+        expected_t = (cum / total_words) * total_dur
+        best_i = -1
+        best_dist = 9999.0
+        for s_i, (s_start, s_end) in enumerate(silences):
+            if s_i in used_indices:
+                continue
+            mid = 0.5 * (s_start + s_end)
+            if mid <= split_points[-1] + 0.4:
+                continue
+            dist = abs(mid - expected_t)
+            if dist < best_dist:
+                best_dist = dist
+                best_i = s_i
+        if best_i >= 0 and best_dist < max(2.5, total_dur * 0.25):
+            used_indices.add(best_i)
+            s_start, s_end = silences[best_i]
+            # Potong di 35% jeda agar helaan napas/ekspresi sebelum kalimat berikutnya ikut masuk ke scene berikutnya
+            cut_t = s_start + 0.35 * (s_end - s_start)
+        else:
+            cut_t = max(split_points[-1] + 0.5, expected_t)
+        split_points.append(round(cut_t, 3))
+    split_points.append(round(total_dur, 3))
+
+    out_paths: list[Path] = []
+    for i, sc in enumerate(scenes):
+        t0, t1 = split_points[i], split_points[i + 1]
+        dst = audio_dir / f"scene_{sc.id:03d}.mp3"
+        cmd = [
+            ffmpeg_exe,
+            "-y",
+            "-i",
+            str(full_audio_path),
+            "-ss",
+            f"{t0:.3f}",
+            "-to",
+            f"{t1:.3f}",
+            "-c:a",
+            "libmp3lame",
+            "-q:a",
+            "2",
+            str(dst),
+        ]
+        subprocess.run(cmd, capture_output=True, text=True)
+        out_paths.append(dst)
+    return out_paths
+
+
 def render_project(
     project: Project,
     voice: str = DEFAULT_VOICE,
@@ -974,6 +1058,7 @@ def render_project(
     style_override: str | None = None,
     image_fetcher: Callable[[str], bytes] | None = None,
     keep_audio: bool = False,
+    full_audio_path: Path | None = None,
 ) -> Path:
     """Render seluruh scene di proyek menjadi video MP4 full-screen lengkap dengan aset gambar AI, audio, dan subtitle karaoke."""
     import imageio_ffmpeg
@@ -1006,6 +1091,12 @@ def render_project(
     images_dir = project.out_dir / "images"
     for d in (frames_dir, audio_dir, segments_dir):
         d.mkdir(parents=True, exist_ok=True)
+
+    if full_audio_path is not None:
+        if not full_audio_path.exists():
+            raise ValueError(f"File audio tidak ditemukan: {full_audio_path}")
+        split_full_audio_to_scenes(ffmpeg_exe, full_audio_path, sb.scenes, audio_dir)
+        keep_audio = True
 
     synth = tts_fn or synthesize_tts
     audio_ext = ".wav" if tts_fn is not None else ".mp3"

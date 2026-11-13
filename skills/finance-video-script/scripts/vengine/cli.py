@@ -140,13 +140,17 @@ def cmd_render(a) -> int:
     style = getattr(a, "style", None) or brief.style
     fps = getattr(a, "fps", None) or (12 if style.strip().lower() == "claymation" else 15)
     keep_audio = bool(getattr(a, "keep_audio", False))
-    print(f"Me-render video untuk proyek '{a.slug}' (suara: {a.voice}, fps: {fps})...")
+    audio_file_arg = getattr(a, "audio_file", None)
+    full_audio = Path(audio_file_arg) if audio_file_arg else None
+    voice_label = f"file:{full_audio.name}" if full_audio else ("existing-audio" if keep_audio else a.voice)
+    print(f"Me-render video untuk proyek '{a.slug}' (suara: {voice_label}, fps: {fps})...")
     video_path = render_project(
         p,
         voice=a.voice,
         fps=fps,
         style_override=getattr(a, "style", None),
         keep_audio=keep_audio,
+        full_audio_path=full_audio,
     )
     total_dur = sum((s.duration or 0.0) for s in p.load_storyboard().scenes)
     print(f"Selesai! Video dibuat: {video_path} (durasi: {total_dur:.1f} detik, {fps} FPS)")
@@ -191,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--style", default=None, help="preset atau custom style visual jika gambar belum dibuat")
     s.add_argument("--fps", type=int, default=None, help="frame rate render (default: 12 untuk claymation, 15 untuk lainnya)")
     s.add_argument("--keep-audio", action="store_true", help="gunakan file audio yang sudah ada di out/audio/ (mis. hasil ElevenLabs) tanpa menimpa")
+    s.add_argument("--audio-file", default=None, help="path ke 1 file MP3 utuh (mis. hasil ElevenLabs) untuk dipotong otomatis per scene")
     s.set_defaults(fn=cmd_render)
 
     a = ap.parse_args(argv)
