@@ -35,15 +35,21 @@ Dokumen ini adalah pedoman wajib yang harus dipatuhi setiap kali membuat aset ga
 
 ---
 
-## C. Standar Subtitle & Safe Area (Typography & Layout Rules)
+## C. Standar Subtitle, Tipografi & Safe Area (Typography, Readability & Layout Rules)
 
-1. **Semantic Chunking (Pemenggalan Frasa Utuh):**
-   - Pecah teks subtitle berdasarkan **kesatuan frasa makna**, bukan sekadar batas jumlah karakter.
-   - Kata depan (`di`, `ke`, `dari`, `pada`, `untuk`, `dengan`, `tanpa`, `agar`) dan frasa majemuk (`malam hari`, `masa depanmu`, `tanpa terasa`) **wajib berada dalam satu tampilan layar / baris yang sama**:
+1. **Semantic Chunking & Phrase-Aware Tokenization:**
+   - Pecah teks subtitle berdasarkan **kesatuan frasa makna** (maksimal **4–6 kata**, maksimal **2 baris** seimbang).
+   - Kata depan & kata sambung (`di`, `ke`, `dari`, `pada`, `untuk`, `dengan`, `tanpa`, `agar`, `yang`, `dan`) serta frasa majemuk (`malam hari`, `masa depan`, `tanpa terasa`, `rumah sakit`) **wajib berada dalam satu tampilan layar / baris yang sama**:
      - ❌ `Layar ponsel yang menyala terang di malam | hari menguras energimu.`
      - ✅ `Layar ponsel yang menyala terang | di malam hari menguras energimu.`
-   - Batasi maksimal **4–6 kata per tampilan** (maksimal 2 baris seimbang).
 
-2. **Vertical Video Safe Zone (9:16):**
-   - Beri jarak aman (*padding*) minimal **10–12% dari tepi atas dan bawah**, serta **8% dari tepi kiri dan kanan**.
-   - **Hindari meletakkan progress bar di piksel paling atas (`y = 0`)**; letakkan sedikit di atas area teks subtitle atau hilangkan sepenuhnya agar visual sinematik lebih bersih.
+2. **Standar Emas Tipografi & Readability (Kanvas `1080×1920`):**
+   - **Primary Font:** `Plus Jakarta Sans` ExtraBold (Weight: `800`) atau `Rubik` ExtraBold (`800`), **Size `54px–62px`** (`56px` default vertikal), **`line-height: 1.22`**, **Normal Sentence Case** (hindari ALL CAPS untuk kalimat panjang).
+   - **Balanced Lines (`textWrap: 'balance'`):** `maxWidth: 880px` (`82%` lebar kanvas) dengan pembagian panjang baris atas dan bawah yang proporsional agar tidak menyisakan 1 kata yatim di baris kedua.
+   - **Wajib `paintOrder: 'stroke fill'` + Multi-Layer Shadow:** Gambar *outer stroke* gelap tebal `10px–12px` (`#0B0F19`) di luar huruf sebelum *fill* (agar huruf tetap bulat utuh, tidak kurus), ditambah bayangan lembut (`0px 8px 16px rgba(0,0,0,0.65)`) agar tetap kontras di latar terang maupun gelap.
+   - **Palet Warna Kontras Tinggi:** Teks utama **Putih Bersih (`#FFFFFF`)** dan kata kunci/aktif **Kuning Emas (`#FACC15`)** atau **Hijau Mint (`#4ADE80`)**.
+
+3. **9:16 UI Safe Margin (`1080×1920`):**
+   - **Top margin:** minimal **`180px` bersih** (dilarang menaruh progress bar di `y = 0`; letakkan tipis di atas area teks subtitle atau hilangkan).
+   - **Bottom margin:** tempatkan subtitle di rentang **`280px` hingga `380px` dari tepi bawah** agar bebas dari UI caption TikTok/Reels/Shorts.
+   - **Horizontal padding:** minimal **`90px` kiri dan kanan**.

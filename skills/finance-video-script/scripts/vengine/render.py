@@ -16,26 +16,31 @@ from .page_mapper import map_storyboard_pages
 from .project import Project
 from .schema import Scene, WordTiming
 
-# Palet warna sinematik
-BG_DARK = (15, 23, 42)         # #0F172A
+# Palet warna sinematik & tipografi kontras tinggi
+BG_DARK = (15, 23, 42)            # #0F172A
 INK = (15, 23, 42)
-ACCENT = (232, 163, 61)        # #E8A33D
-POSITIVE = (52, 211, 153)      # #34D399 (cerah di atas glass gelap)
-NEGATIVE = (248, 113, 113)     # #F87171
+ACCENT = (232, 163, 61)           # #E8A33D
+HIGHLIGHT_YELLOW = (250, 204, 21) # #FACC15
+HIGHLIGHT_MINT = (74, 222, 128)   # #4ADE80
+STROKE_DARK = (11, 15, 25, 255)   # #0B0F19
+POSITIVE = (52, 211, 153)         # #34D399
+NEGATIVE = (248, 113, 113)        # #F87171
 WHITE = (255, 255, 255)
 MUTED = (203, 213, 225)
 
 DEFAULT_VOICE = "id-ID-ArdiNeural"
 _FONT_CACHE: dict[tuple[int, bool], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 _VIGNETTE_CACHE: dict[tuple[int, int, bool], Image.Image] = {}
+_ASSETS_FONTS_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "fonts"
 
 
 def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     key = (size, bold)
     if key in _FONT_CACHE:
         return _FONT_CACHE[key]
+    bold_local = str(_ASSETS_FONTS_DIR / "PlusJakartaSans-ExtraBold.ttf")
     candidates = (
-        ["segoeuib.ttf", "arialbd.ttf", "calibrib.ttf", "DejaVuSans-Bold.ttf"]
+        [bold_local, "segoeuib.ttf", "arialbd.ttf", "calibrib.ttf", "DejaVuSans-Bold.ttf"]
         if bold
         else ["segoeui.ttf", "arial.ttf", "calibri.ttf", "DejaVuSans.ttf"]
     )
@@ -194,6 +199,59 @@ def _chunk_words_semantic(words: list[WordTiming], max_words: int = 5) -> list[l
     return chunks
 
 
+def _balance_subtitle_lines(
+    word_items: list[tuple[int, str, int]],
+    space_w: int,
+    max_line_w: int,
+) -> list[list[tuple[int, str, int]]]:
+    """Bagi kata subtitle menjadi maksimal 2 baris yang lebarnya seimbang (textWrap: 'balance') tanpa kata depan menggantung."""
+    if not word_items:
+        return []
+    total_w = sum(x[2] for x in word_items) + space_w * max(0, len(word_items) - 1)
+    if total_w <= max_line_w and len(word_items) <= 3:
+        return [word_items]
+
+    best_split: int | None = None
+    best_score = float("inf")
+    n = len(word_items)
+    for split_i in range(1, n):
+        left = word_items[:split_i]
+        right = word_items[split_i:]
+        w_left = sum(x[2] for x in left) + space_w * max(0, len(left) - 1)
+        w_right = sum(x[2] for x in right) + space_w * max(0, len(right) - 1)
+        if w_left > max_line_w or w_right > max_line_w:
+            continue
+        penalty = 0.0
+        last_left_clean = re.sub(r"[^\w]", "", left[-1][1].lower())
+        if last_left_clean in _NO_BREAK_AFTER_WORDS:
+            penalty += 5000.0
+        if len(right) == 1 and n >= 3:
+            penalty += 3000.0
+        score = abs(w_left - w_right) + penalty
+        if score < best_score:
+            best_score = score
+            best_split = split_i
+
+    if best_split is not None:
+        return [word_items[:best_split], word_items[best_split:]]
+
+    # Fallback greedy wrap bila teks sangat panjang
+    lines: list[list[tuple[int, str, int]]] = []
+    cur_line: list[tuple[int, str, int]] = []
+    cur_w = 0
+    for item in word_items:
+        if cur_line and cur_w + space_w + item[2] > max_line_w:
+            lines.append(cur_line)
+            cur_line = [item]
+            cur_w = item[2]
+        else:
+            cur_w += (space_w if cur_line else 0) + item[2]
+            cur_line.append(item)
+    if cur_line:
+        lines.append(cur_line)
+    return lines[:2]
+
+
 def _draw_karaoke_subtitle(
     draw: ImageDraw.ImageDraw,
     scene: Scene,
@@ -203,7 +261,7 @@ def _draw_karaoke_subtitle(
     height: int,
     is_vertical: bool,
 ) -> None:
-    """Gambar subtitle karaoke dengan Semantic Chunking (4-6 kata utuh) & Vertical Safe Zone (8% X, 12% bawah)."""
+    """Gambar subtitle dengan Plus Jakarta Sans ExtraBold, outer stroke (#0B0F19), drop shadow, balanced lines & safe zone 9:16."""
     words = scene.words or compute_word_timings(scene.narration, duration)
     if not words:
         return
@@ -211,7 +269,6 @@ def _draw_karaoke_subtitle(
     max_words = 5 if is_vertical else 9
     chunks = _chunk_words_semantic(words, max_words=max_words)
 
-    # Cari chunk yang memuat act_idx
     chunk: list[WordTiming] = chunks[0]
     local_act = 0
     offset = 0
@@ -222,61 +279,57 @@ def _draw_karaoke_subtitle(
             break
         offset += len(ch)
 
-    # Safe zone vertikal 9:16: minimal 8% kiri/kanan, 12% bawah
-    margin_x = int(width * 0.08)
-    sub_zone_top = int(height * 0.72) if is_vertical else int(height * 0.75)
-    sub_zone_bot = int(height * 0.88) if is_vertical else int(height * 0.90)
+    # 9:16 Safe Zone: min 90px kiri/kanan (maxWidth ~880px), subtitle di 280px–380px dari tepi bawah
+    font_size = 56 if is_vertical else 48
+    font = _load_font(font_size, bold=True)
+    max_line_w = min(880, width - 180) if is_vertical else min(1320, width - 240)
+    sub_zone_bot = (height - 280) if is_vertical else (height - 110)
+    sub_zone_top = (height - 430) if is_vertical else (height - 240)
 
-    font = _load_font(44 if is_vertical else 42, bold=True)
-    max_line_w = (width - 2 * margin_x) - 24
-
-    lines: list[list[tuple[int, str, int]]] = []
-    cur_line: list[tuple[int, str, int]] = []
-    cur_w = 0
     space_w = draw.textbbox((0, 0), " ", font=font)[2]
-
+    measured: list[tuple[int, str, int]] = []
     for idx, wt in enumerate(chunk):
         wb = draw.textbbox((0, 0), wt.word, font=font)
-        ww = wb[2] - wb[0]
-        if cur_line and cur_w + space_w + ww > max_line_w:
-            # Jika kata terakhir di baris pertama adalah kata depan/penghubung, pindahkan ke baris kedua bersama pasangannya
-            prev_clean = re.sub(r"[^\w]", "", cur_line[-1][1].lower())
-            if prev_clean in _NO_BREAK_AFTER_WORDS and len(cur_line) > 1:
-                carried = cur_line.pop()
-                lines.append(cur_line)
-                cur_line = [carried, (idx, wt.word, ww)]
-                cur_w = carried[2] + space_w + ww
-            else:
-                lines.append(cur_line)
-                cur_line = [(idx, wt.word, ww)]
-                cur_w = ww
-        else:
-            cur_w += (space_w if cur_line else 0) + ww
-            cur_line.append((idx, wt.word, ww))
-    if cur_line:
-        lines.append(cur_line)
+        measured.append((idx, wt.word, wb[2] - wb[0]))
 
-    line_h = 60 if is_vertical else 52
+    lines = _balance_subtitle_lines(measured, space_w=space_w, max_line_w=max_line_w)
+    line_h = int(round(font_size * 1.22))
     total_h = len(lines) * line_h
-    start_y = (sub_zone_top + sub_zone_bot - total_h) // 2
+    start_y = max(sub_zone_top, sub_zone_bot - total_h)
 
+    stroke_w = 6 if is_vertical else 5  # outer stroke ~10-12px total di sekeliling huruf (paint-order: stroke fill)
     for r_i, line in enumerate(lines):
         row_w = sum(x[2] for x in line) + space_w * max(0, len(line) - 1)
         x = width // 2 - row_w // 2
         y = start_y + r_i * line_h
         for idx, word_str, ww in line:
-            if idx == local_act:
-                pad_x, pad_y = 12, 6
-                draw.rounded_rectangle(
-                    [x - pad_x, y - pad_y, x + ww + pad_x, y + line_h - 8],
-                    radius=14,
-                    fill=(ACCENT[0], ACCENT[1], ACCENT[2], 245),
-                )
-                draw.text((x, y), word_str, font=font, fill=BG_DARK)
-            elif idx < local_act:
-                _draw_text_with_shadow(draw, (x, y), word_str, font=font, fill=WHITE)
-            else:
-                _draw_text_with_shadow(draw, (x, y), word_str, font=font, fill=(215, 222, 234))
+            word_fill = HIGHLIGHT_YELLOW if idx == local_act else WHITE
+            # Multi-layer soft drop shadow (0px 8px 16px rgba(0,0,0,0.65))
+            draw.text(
+                (x, y + 8),
+                word_str,
+                font=font,
+                fill=(0, 0, 0, 165),
+                stroke_width=stroke_w,
+                stroke_fill=(0, 0, 0, 140),
+            )
+            draw.text(
+                (x, y + 4),
+                word_str,
+                font=font,
+                fill=(0, 0, 0, 110),
+                stroke_width=stroke_w,
+                stroke_fill=(0, 0, 0, 100),
+            )
+            # Outer stroke (#0B0F19) digambar di luar huruf lalu diisi warna utama (paint-order: stroke fill)
+            draw.text(
+                (x, y),
+                word_str,
+                font=font,
+                fill=word_fill,
+                stroke_width=stroke_w,
+                stroke_fill=STROKE_DARK,
+            )
             x += ww + space_w
 
 
@@ -664,17 +717,17 @@ def render_scene_frame_at(
 
     _draw_ambient_particles(draw, width, height, t=t, scene_id=scene.id)
 
-    # Progress bar tipis elegan diletakkan di atas area teks subtitle (safe zone, bukan di y=0)
+    # Progress bar tipis elegan diletakkan tepat di atas area teks subtitle (safe zone 9:16, bukan di y=0)
     bar_h = 4
-    bar_y = int(height * 0.70) if is_vertical else int(height * 0.73)
-    bar_margin = int(width * 0.08)
+    bar_y = (height - 460) if is_vertical else (height - 265)
+    bar_margin = 100 if is_vertical else 120
     bar_total_w = width - 2 * bar_margin
     draw.rounded_rectangle([bar_margin, bar_y, width - bar_margin, bar_y + bar_h], radius=2, fill=(255, 255, 255, 45))
     prog_w = max(8, int(bar_total_w * p))
     draw.rounded_rectangle(
         [bar_margin, bar_y, bar_margin + prog_w, bar_y + bar_h],
         radius=2,
-        fill=(ACCENT[0], ACCENT[1], ACCENT[2], 210),
+        fill=(HIGHLIGHT_YELLOW[0], HIGHLIGHT_YELLOW[1], HIGHLIGHT_YELLOW[2], 220),
     )
 
     font_badge = _load_font(26 if is_vertical else 22, bold=True)
