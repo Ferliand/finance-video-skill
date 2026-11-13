@@ -854,10 +854,46 @@ def _probe_audio_duration(audio_path: Path) -> float:
 
 
 def synthesize_tts(text: str, out_path: Path, voice: str = DEFAULT_VOICE) -> float:
-    """Hasilkan file MP3 dari teks Bahasa Indonesia menggunakan edge-tts dan kembalikan durasinya."""
-    import edge_tts
-
+    """Hasilkan file MP3 dari teks Bahasa Indonesia menggunakan edge-tts atau ElevenLabs API dan kembalikan durasinya."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if voice.lower().startswith("elevenlabs:"):
+        import json
+        import os
+        import urllib.request
+
+        voice_id = voice.split(":", 1)[1].strip()
+        api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("ELEVENLABS_API_KEY belum diset di environment variable.")
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        payload = json.dumps(
+            {
+                "text": text,
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {
+                    "stability": 0.48,
+                    "similarity_boost": 0.80,
+                    "style": 0.28,
+                    "use_speaker_boost": True,
+                },
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={
+                "xi-api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            out_path.write_bytes(resp.read())
+        return _probe_audio_duration(out_path)
+
+    import edge_tts
 
     async def _run() -> None:
         comm = edge_tts.Communicate(text, voice)
@@ -937,6 +973,7 @@ def render_project(
     fps: int = 15,
     style_override: str | None = None,
     image_fetcher: Callable[[str], bytes] | None = None,
+    keep_audio: bool = False,
 ) -> Path:
     """Render seluruh scene di proyek menjadi video MP4 full-screen lengkap dengan aset gambar AI, audio, dan subtitle karaoke."""
     import imageio_ffmpeg
@@ -1003,7 +1040,10 @@ def render_project(
                     pose_imgs.append(loaded_pose.convert("RGB"))
 
         spoken = s.tts_text or s.narration
-        dur = synth(spoken, audio_path, voice)
+        if keep_audio and audio_path.exists() and audio_path.stat().st_size > 100:
+            dur = _probe_audio_duration(audio_path)
+        else:
+            dur = synth(spoken, audio_path, voice)
         s.duration = round(dur, 3)
         s.words = compute_word_timings(s.narration, s.duration)
 

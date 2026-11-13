@@ -107,6 +107,12 @@ def test_export_prompts_and_srt(tmp_path):
     assert "00:00:00,000 -->" in srt
     assert "1\n" in srt
 
+    el_md = workflow.export_elevenlabs(p)
+    assert "Naskah Narator ElevenLabs" in el_md
+    assert "Eleven Multilingual v2" in el_md
+    el_txt = workflow.export_elevenlabs_plain(p)
+    assert '<break time="0.5s" />' in el_txt
+
 
 
 def run_cli(cwd, *args, stdin=None):

@@ -33,12 +33,14 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
 6. **Petakan Halaman Visual.** Jalankan `map-pages <slug>` untuk memetakan `page_type` dan `props` secara otomatis mengikuti katalog `references/design-video.md`.
 7. **Ekspor.** `export <slug>` menghasilkan:
    - `video-projects/<slug>/out/naskah.md` (naskah kanonik per babak)
+   - `video-projects/<slug>/out/naskah_elevenlabs.md` (panduan lengkap slider ElevenLabs per mood, teks copy-paste per scene untuk Multilingual v2 & Eleven v3 dengan audio tags, serta teks utuh)
+   - `video-projects/<slug>/out/naskah_elevenlabs.txt` (naskah bersih siap copy-paste sekali jalan ke ElevenLabs)
    - `video-projects/<slug>/out/prompts.json` (prompt ilustrasi *full-screen* siap generate untuk seluruh scene lengkap dengan karakter & style)
    - `video-projects/<slug>/out/naskah.srt` (subtitle ber-timestamp)
 8. **Generate Aset Gambar AI Full-Screen.**
    - **Prioritas Utama (di dalam Agen):** Jika agen memiliki subagent/tool `image-generator` bawaan (Google Imagen / Gemini Image), **wajib gunakan `image-generator`** untuk men-generate gambar dari `video-projects/<slug>/out/prompts.json` langsung ke `video-projects/<slug>/out/images/scene_XXX.png` (serta `scene_XXX_end.png` jika ada `end_prompt`), lalu jalankan `generate-images <slug>` tanpa `--force` untuk menautkan path `image_file` di `storyboard.json`.
    - **Alternatif CLI mandiri:** Jalankan `generate-images <slug>` (bisa tambah `--style <style>`, `--scene <nomor>`, atau `--force`) untuk mengunduh gambar via endpoint CLI ke `video-projects/<slug>/out/images/scene_XXX.png`.
-9. **Render Video MP4 (opsional/jika diminta).** Jalankan `render <slug>` (bisa tambah `--voice id-ID-ArdiNeural` atau `id-ID-GadisNeural`, serta `--fps 12` untuk gaya stop-motion `claymation`) untuk menggabungkan gambar latar *full-screen* (dengan gerak *stop-motion* / *Ken Burns*, *vignette*, overlay *glassmorphism* angka/punchline, dan subtitle karaoke), audio voiceover Bahasa Indonesia, menjadi `video-projects/<slug>/out/video.mp4`.
+9. **Render Video MP4 (opsional/jika diminta).** Jalankan `render <slug>` (bisa tambah `--voice id-ID-ArdiNeural`, `id-ID-GadisNeural`, atau `elevenlabs:<voice_id>` dengan `ELEVENLABS_API_KEY`; tambahkan `--keep-audio` jika sudah menaruh MP3 manual hasil ElevenLabs di `out/audio/scene_XXX.mp3`; serta `--fps 12` untuk gaya stop-motion `claymation`) untuk menggabungkan gambar latar *full-screen* (dengan gerak *stop-motion* / *Ken Burns*, *vignette*, overlay *glassmorphism* angka/punchline, dan subtitle karaoke), audio voiceover Bahasa Indonesia, menjadi `video-projects/<slug>/out/video.mp4`.
 
 ## Format JSON scene
 

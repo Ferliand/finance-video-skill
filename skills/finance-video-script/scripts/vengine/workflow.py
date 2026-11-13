@@ -121,6 +121,7 @@ def parse_scenes(items: list[dict], beat: Beat, bible: StoryBible) -> tuple[list
         scenes.append(Scene(
             id=0, beat=beat.id,
             narration=str(it.get("narration", "")).strip(),
+            tts_text=(str(it.get("tts_text")).strip() if it.get("tts_text") else None),
             tags=tags, notes=str(it.get("notes") or ""),
             image_prompt=it.get("image_prompt") or None,
             end_image_prompt=it.get("end_image_prompt") or None,
@@ -246,3 +247,130 @@ def export_srt(project: Project) -> str:
         current_time += dur + s.hold_after
         entries.append(f"{s.id}\n{start_ts} --> {end_ts}\n{s.narration}\n")
     return "\n".join(entries)
+
+
+_ELEVENLABS_MOOD_GUIDE: dict[str, dict[str, str]] = {
+    "tense": {
+        "v3_tag": "[serious, low tone]",
+        "direction": "Intonasi rendah, pelan di awal, beri penekanan serius pada kata kunci.",
+        "stability": "45%",
+        "similarity": "80%",
+        "style": "30%",
+    },
+    "melancholy": {
+        "v3_tag": "[sighs, tired]",
+        "direction": "Suara lelah/empatik, tempo sedikit melambat dengan jeda napas halus.",
+        "stability": "40%",
+        "similarity": "80%",
+        "style": "35%",
+    },
+    "neutral": {
+        "v3_tag": "[calm, clear]",
+        "direction": "Jernih, tenang, artikulasi angka dan langkah terdengar tegas.",
+        "stability": "55%",
+        "similarity": "80%",
+        "style": "20%",
+    },
+    "warm": {
+        "v3_tag": "[warm, friendly]",
+        "direction": "Hangat, akrab seperti teman mengobrol, senyum tipis di suara.",
+        "stability": "50%",
+        "similarity": "80%",
+        "style": "25%",
+    },
+    "uplift": {
+        "v3_tag": "[hopeful, energetic]",
+        "direction": "Optimis, energi naik secara bertahap, memberi semangat di akhir kalimat.",
+        "stability": "45%",
+        "similarity": "80%",
+        "style": "35%",
+    },
+}
+
+
+def normalize_for_elevenlabs(scene: Scene, with_v3_tags: bool = False) -> str:
+    """Siapkan teks narasi ramah-ElevenLabs (ejaan lisan Indonesia + jeda napas alami '...' / '—')."""
+    base = (scene.tts_text or scene.narration).strip()
+    # Normalisasi simbol umum agar pelafalan Bahasa Indonesia di ElevenLabs mulus
+    base = re.sub(r"\bRp\.?\s*(\d)", r"\1", base)
+    base = re.sub(r"(\d)\s*%", r"\1 persen", base)
+    # Sisipkan jeda napas halus ('—') setelah kata penghubung panjang jika belum ada tanda baca jeda
+    if "..." not in base and "—" not in base:
+        if "PUNCH" in scene.tags:
+            base = re.sub(r",\s+", " — ", base, count=1)
+        elif "BRIDGE" in scene.tags:
+            base = re.sub(r"\b(agar|supaya|sehingga|karena)\b", r"... \1", base, count=1)
+    if with_v3_tags:
+        guide = _ELEVENLABS_MOOD_GUIDE.get(scene.mood, _ELEVENLABS_MOOD_GUIDE["neutral"])
+        return f"{guide['v3_tag']} {base}"
+    return base
+
+
+def export_elevenlabs(project: Project) -> str:
+    """Ekspor panduan & naskah narator khusus ElevenLabs (Multilingual v2 & Eleven v3) ke Markdown."""
+    sb = project.load_storyboard()
+    brief = project.load_brief()
+    title = sb.title or brief.topik
+    lines = [
+        f"# Naskah Narator ElevenLabs — {title}",
+        "",
+        "## 1. Rekomendasi Pengaturan Suara (ElevenLabs Voice Settings)",
+        "- **Model:** `Eleven Multilingual v2` (paling stabil untuk Bahasa Indonesia) atau `Eleven v3` (mendukung tag ekspresi `[sighs]`, `[warm]`)",
+        "- **Stability:** `45% – 55%` *(jangan terlalu tinggi agar intonasi bercerita tidak kaku/robotik)*",
+        "- **Similarity Boost:** `75% – 85%`",
+        "- **Style Exaggeration:** `20% – 35%`",
+        "- **Speaker Boost:** `ON`",
+        "",
+        "---",
+        "",
+        "## 2. Naskah Per-Scene (Untuk Generate & Simpan ke `out/audio/scene_XXX.mp3`)",
+        "",
+    ]
+    for s in sb.scenes:
+        guide = _ELEVENLABS_MOOD_GUIDE.get(s.mood, _ELEVENLABS_MOOD_GUIDE["neutral"])
+        clean_txt = normalize_for_elevenlabs(s, with_v3_tags=False)
+        v3_txt = normalize_for_elevenlabs(s, with_v3_tags=True)
+        lines += [
+            f"### Scene {s.id:03d} (`out/audio/scene_{s.id:03d}.mp3`)",
+            f"- **Beat / Mood:** `{s.beat}` · `{s.mood}` ({guide['direction']})",
+            f"- **Slider:** Stability `{guide['stability']}` | Similarity `{guide['similarity']}` | Style `{guide['style']}`",
+            "- **Teks Copy-Paste (Multilingual v2 / Turbo v2.5):**",
+            "```text",
+            clean_txt,
+            "```",
+            "- **Teks dengan Audio Tag (Eleven v3):**",
+            "```text",
+            v3_txt,
+            "```",
+            "",
+        ]
+
+    lines += [
+        "---",
+        "",
+        "## 3. Naskah Utuh Sekali Generate (Dengan Jeda Antar-Scene)",
+        "",
+        "### Versi Multilingual v2 (Jeda `<break>`) :",
+        "```text",
+        export_elevenlabs_plain(project, with_v3_tags=False),
+        "```",
+        "",
+        "### Versi Eleven v3 (Dengan Audio Tags) :",
+        "```text",
+        export_elevenlabs_plain(project, with_v3_tags=True),
+        "```",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def export_elevenlabs_plain(project: Project, with_v3_tags: bool = False) -> str:
+    """Ekspor teks bersih siap copy-paste ke kotak input ElevenLabs dalam sekali jalan."""
+    sb = project.load_storyboard()
+    chunks = []
+    for idx, s in enumerate(sb.scenes):
+        txt = normalize_for_elevenlabs(s, with_v3_tags=with_v3_tags)
+        chunks.append(txt)
+        if idx < len(sb.scenes) - 1:
+            chunks.append('<break time="0.5s" />')
+    return "\n\n".join(chunks)

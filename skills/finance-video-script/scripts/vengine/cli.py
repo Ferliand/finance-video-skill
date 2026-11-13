@@ -112,6 +112,14 @@ def cmd_export(a) -> int:
     out_srt = p.out_dir / "naskah.srt"
     out_srt.write_text(workflow.export_srt(p), encoding="utf-8", newline="\n")
     print(f"Ditulis: {out_srt}")
+
+    out_el_md = p.out_dir / "naskah_elevenlabs.md"
+    out_el_md.write_text(workflow.export_elevenlabs(p), encoding="utf-8", newline="\n")
+    print(f"Ditulis: {out_el_md}")
+
+    out_el_txt = p.out_dir / "naskah_elevenlabs.txt"
+    out_el_txt.write_text(workflow.export_elevenlabs_plain(p), encoding="utf-8", newline="\n")
+    print(f"Ditulis: {out_el_txt}")
     return 0
 
 
@@ -131,8 +139,15 @@ def cmd_render(a) -> int:
     brief = p.load_brief()
     style = getattr(a, "style", None) or brief.style
     fps = getattr(a, "fps", None) or (12 if style.strip().lower() == "claymation" else 15)
+    keep_audio = bool(getattr(a, "keep_audio", False))
     print(f"Me-render video untuk proyek '{a.slug}' (suara: {a.voice}, fps: {fps})...")
-    video_path = render_project(p, voice=a.voice, fps=fps, style_override=getattr(a, "style", None))
+    video_path = render_project(
+        p,
+        voice=a.voice,
+        fps=fps,
+        style_override=getattr(a, "style", None),
+        keep_audio=keep_audio,
+    )
     total_dur = sum((s.duration or 0.0) for s in p.load_storyboard().scenes)
     print(f"Selesai! Video dibuat: {video_path} (durasi: {total_dur:.1f} detik, {fps} FPS)")
     return 0
@@ -172,9 +187,10 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--force", action="store_true", help="timpa file gambar yang sudah ada")
     s.set_defaults(fn=cmd_generate_images)
     s = sub.add_parser("render"); s.add_argument("slug")
-    s.add_argument("--voice", default="id-ID-ArdiNeural", help="suara edge-tts (default: id-ID-ArdiNeural)")
+    s.add_argument("--voice", default="id-ID-ArdiNeural", help="suara edge-tts atau 'elevenlabs:<voice_id>' (default: id-ID-ArdiNeural)")
     s.add_argument("--style", default=None, help="preset atau custom style visual jika gambar belum dibuat")
     s.add_argument("--fps", type=int, default=None, help="frame rate render (default: 12 untuk claymation, 15 untuk lainnya)")
+    s.add_argument("--keep-audio", action="store_true", help="gunakan file audio yang sudah ada di out/audio/ (mis. hasil ElevenLabs) tanpa menimpa")
     s.set_defaults(fn=cmd_render)
 
     a = ap.parse_args(argv)
