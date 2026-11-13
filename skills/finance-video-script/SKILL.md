@@ -22,7 +22,7 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
 ## Alur kerja
 
 1. **Kumpulkan brief.** Tanyakan yang belum jelas: topik, format (A = cerita, B = panduan langkah, S = short-form 30–60 detik), durasi, `style` visual (preset: `claymation`, `flat-vector`, `3d-pixar`, `anime-ghibli`, `cinematic-realistic`, `watercolor`, `comic-book`, `dark-moody`, atau deskripsi custom bebas), audiens, `angka_kunci`, dan khusus format A tokoh (protagonis, pembanding, figuran). Tanyakan juga ajakan komentar/subscribe dan instrumen keuangan yang boleh disebut. **Jangan mengarang angka kunci**; angka berasal dari pengguna atau dari hitungan yang kamu tulis rumusnya.
-2. **Baca `references/panduan-naskah.md`** sebelum menulis apa pun. Itu sumber kebenaran gaya, teknik, dan aturan angka/klaim.
+2. **Baca `references/panduan-naskah.md` dan `references/standar-kualitas-animasi.md`** sebelum menulis naskah atau membuat aset visual/animasi. Itu sumber kebenaran gaya, teknik, aturan angka/klaim, serta SOP wajib agar gambar konsisten dan animasi mulus satu arah (tanpa *ping-pong loop* berulang-ulang).
 3. **Buat proyek.** `init <slug> --topic "..." --format A|B|S --minutes N --style <style>`, isi `brief.yaml` bersama pengguna, lalu `build <slug>` (membuat story bible dan beat sheet).
 4. **Tulis per beat** (ulangi sampai semua beat selesai):
    1. `beat <slug>` menampilkan tugas untuk beat berikutnya: brief, tokoh, tiga scene sebelumnya, poin isi, target kata/scene, dan syarat tag.

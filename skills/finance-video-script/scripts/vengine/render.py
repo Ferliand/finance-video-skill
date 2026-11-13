@@ -261,6 +261,34 @@ def _make_smooth_radial_glow(
     return small.resize((width, height), Image.Resampling.BICUBIC)
 
 
+def _interpolate_progressive_poses(
+    poses: list[Image.Image],
+    p: float,
+    order: tuple[int, ...] | None = None,
+) -> Image.Image:
+    """Interpolasi progresif satu arah (Start -> Mid -> End) tanpa pengulangan (no loop) dengan S-curve cross-blend halus."""
+    seq = [poses[i % len(poses)] for i in order] if order else list(poses)
+    n = len(seq)
+    if n == 1:
+        return seq[0]
+
+    # Bagi progres [0..1] menjadi (n) segmen: tiap segmen punya plateau tenang (55%) + transisi S-curve halus (45%)
+    scaled = _clamp(p, 0.0, 0.9999) * (n - 1)
+    idx = int(scaled)
+    frac = scaled - idx
+    if idx >= n - 1:
+        return seq[-1]
+
+    # Plateau hold di awal & akhir segmen (0.0..0.20 dan 0.80..1.0), cross-blend S-curve di tengah (0.20..0.80)
+    if frac <= 0.20:
+        return seq[idx]
+    if frac >= 0.80:
+        return seq[idx + 1]
+    t_blend = (frac - 0.20) / 0.60
+    smooth_alpha = 0.5 - 0.5 * math.cos(math.pi * t_blend)
+    return Image.blend(seq[idx], seq[idx + 1], smooth_alpha)
+
+
 def _apply_clay_stop_motion(
     raw_bg: Image.Image,
     end_bg: Image.Image | None,
@@ -271,76 +299,68 @@ def _apply_clay_stop_motion(
     duration: float,
     pose_images: list[Image.Image] | None = None,
 ) -> Image.Image:
-    """Render gerak stop-motion 12 FPS (multi-pose clay keyframes, stepped cadence 'on twos', flicker, bobbing, atau switch light)."""
+    """Render gerak claymation progresif satu arah (tanpa ping-pong loop, kamera stabil & transisi S-curve mulus)."""
     if raw_bg.size != (width, height):
-        raw_bg = raw_bg.resize((width, height), Image.Resampling.BILINEAR)
+        raw_bg = raw_bg.resize((width, height), Image.Resampling.BICUBIC)
     if end_bg is not None and end_bg.size != (width, height):
-        end_bg = end_bg.resize((width, height), Image.Resampling.BILINEAR)
+        end_bg = end_bg.resize((width, height), Image.Resampling.BICUBIC)
 
     poses: list[Image.Image] = []
     if pose_images:
         for pim in pose_images:
-            poses.append(pim.resize((width, height), Image.Resampling.BILINEAR) if pim.size != (width, height) else pim)
+            poses.append(pim.resize((width, height), Image.Resampling.BICUBIC) if pim.size != (width, height) else pim)
 
     mode = _detect_clay_motion_mode(scene)
-    # Kuantisasi waktu ke 6 pose/detik ('on twos' pada 12 FPS) agar terasa patah-patah organik khas claymation
-    pose_idx = int(t * 6.0)
-    t_step = pose_idx / 6.0
-    p_step = _clamp(t_step / max(0.1, duration))
-
-    # Micro-jitter taktil khas pemotretan stop-motion fisik (±2 px)
-    jx = ((pose_idx * 37 + scene.id * 13) % 5) - 2
-    jy = ((pose_idx * 53 + scene.id * 29) % 5) - 2
+    p_smooth = _clamp(t / max(0.1, duration))
+    ease_p = _ease_out_cubic(p_smooth)
 
     if mode == "zoom_flicker":
-        # Pilih keyframe pose karakter (0=netral, 2=tarik napas/scroll, 1=kedip mata & angguk) pada ritme stop-motion
+        # Busur progresif 1 arah (tanpa diulang): Pose 1 (Buka mata) -> Pose 3 (Alis lelah) -> Pose 2 (Mata terpejam lelah)
         active_bg = raw_bg
-        if len(poses) >= 2:
-            cycle = (0, 0, 2, 2, 0, 1, 0, 0, 2, 2, 1, 0)
-            act_idx = int(t * 3.5) % len(cycle)
-            active_bg = poses[cycle[act_idx] % len(poses)]
+        if len(poses) >= 3:
+            active_bg = _interpolate_progressive_poses(poses, p_smooth, order=(0, 2, 1))
+        elif len(poses) == 2:
+            active_bg = _interpolate_progressive_poses(poses, p_smooth, order=(0, 1))
 
-        # Slow push-in ke wajah karakter + gerak napas mikro + kedipan cahaya biru layar HP yang halus
-        zoom = 1.0 + 0.12 * p_step
-        breath = 1.0 + 0.010 * math.sin(pose_idx * 1.2)
-        crop_w = max(1, int(width / zoom))
-        crop_h = max(1, int(height / (zoom * breath)))
-        cx_off = _clamp(0.5 + (jx / width), 0.0, 1.0)
-        cy_off = _clamp(0.42 + (jy / height), 0.0, 1.0)
-        px = int((width - crop_w) * cx_off)
-        py = int((height - crop_h) * cy_off)
-        frame = active_bg.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BILINEAR)
+        # Slow push-in kamera yang 100% mulus (tanpa jitter/goyangan acak)
+        zoom = 1.0 + 0.10 * ease_p
+        crop_w = max(1, int(round(width / zoom)))
+        crop_h = max(1, int(round(height / zoom)))
+        px = (width - crop_w) // 2
+        py = int(round((height - crop_h) * 0.42))
+        frame = active_bg.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BICUBIC)
 
-        flicker_intensity = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(pose_idx * 2.3 + 0.7))
+        flicker_intensity = 0.60 + 0.40 * (0.5 + 0.5 * math.sin(t * 3.0))
         glow = _make_smooth_radial_glow(
             width,
             height,
             center_xy=(0.5, 0.55),
             color=(70, 170, 255),
-            max_alpha=int(72 * flicker_intensity),
+            max_alpha=int(56 * flicker_intensity),
             radius_scale=0.52,
         )
         out = Image.alpha_composite(frame.convert("RGBA"), glow).convert("RGB")
         return _apply_tilt_shift_dof(out)
 
     if mode == "bob_and_sigh":
-        # Pilih keyframe pose ekspresi (0=netral, 2=melirik baterai di atas, 1=menghela napas mata terpejam & baterai berkedip mati)
-        active_bg = raw_bg
-        if len(poses) >= 2:
-            cycle = (0, 0, 2, 2, 0, 1, 1, 2, 2, 1, 1, 0)
-            act_idx = int(t * 3.2) % len(cycle)
-            active_bg = poses[cycle[act_idx] % len(poses)]
+        # Busur progresif 1 arah selaras audio: Pose 2 (Hela napas [sighs] di awal) -> Pose 1 (Netral) -> Pose 3 (Melirik cemas ke baterai merah)
+        if len(poses) >= 3:
+            active_bg = _interpolate_progressive_poses(poses, p_smooth, order=(1, 0, 2))
+            zoom = 1.0 + 0.06 * ease_p
+            crop_w = max(1, int(round(width / zoom)))
+            crop_h = max(1, int(round(height / zoom)))
+            px = (width - crop_w) // 2
+            py = int(round((height - crop_h) * 0.38))
+            composed = active_bg.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BICUBIC)
+            return _apply_tilt_shift_dof(composed)
 
-        base = active_bg.copy()
-        bob_amp = 10 if len(poses) >= 2 else 18
-        bob_dy = int(math.sin(pose_idx * 1.4) * bob_amp)
-        icon_shifted = ImageChops.offset(base, jx, bob_dy)
+        base = raw_bg.copy()
+        bob_dy = int(round(math.sin(t * 2.6) * 12))
+        icon_shifted = ImageChops.offset(base, 0, bob_dy)
+        slump_p = _ease_out_cubic(_clamp((p_smooth - 0.20) / 0.65))
+        slump_dy = int(round(slump_p * 12))
+        body_shifted = ImageChops.offset(base, 0, slump_dy)
 
-        slump_p = _ease_out_cubic(_clamp((p_step - 0.20) / 0.65))
-        slump_dy = (jy if len(poses) >= 2 else int(slump_p * 14) + jy)
-        body_shifted = ImageChops.offset(base, jx, slump_dy)
-
-        # Mask vertikal ber-feather di celah kosong antara baterai dan rambut (y = 0.26..0.30) agar objek utuh
         band_small = Image.new("L", (1, 256), 0)
         for i in range(256):
             yn = i / 255.0
@@ -358,58 +378,41 @@ def _apply_clay_stop_motion(
         return _apply_tilt_shift_dof(composed)
 
     if mode == "switch_light":
-        # Jika ada rangkaian multi-pose (mendekat -> menyentuh bawah -> dorong tengah -> sakelar atas menyala)
+        # Busur progresif 4 tahap satu arah: Mendekat -> Menyentuh bawah -> Dorong tengah -> Sakelar atas menyala terang
         if len(poses) >= 3:
-            if p_step < 0.22:
-                stage_img = poses[0]
-                warm_factor = 0.0
-            elif p_step < 0.42:
-                stage_img = poses[1]
-                warm_factor = 0.0
-            elif p_step < 0.56:
-                stage_img = poses[min(2, len(poses) - 1)]
-                warm_factor = 0.45
-            else:
-                stage_img = poses[-1]
-                warm_factor = 1.0
-
-            zoom = 1.0 + 0.06 * p_step
-            crop_w = max(1, int(width / zoom))
-            crop_h = max(1, int(height / zoom))
-            px = int((width - crop_w) * _clamp(0.5 + (jx / width), 0.0, 1.0))
-            py = int((height - crop_h) * _clamp(0.48 + (jy / height), 0.0, 1.0))
-            frame = stage_img.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BILINEAR)
+            stage_img = _interpolate_progressive_poses(poses, p_smooth)
+            warm_factor = _clamp((p_smooth - 0.45) / 0.35)
+            zoom = 1.0 + 0.06 * ease_p
+            crop_w = max(1, int(round(width / zoom)))
+            crop_h = max(1, int(round(height / zoom)))
+            px = (width - crop_w) // 2
+            py = int(round((height - crop_h) * 0.48))
+            frame = stage_img.crop((px, py, px + crop_w, py + crop_h)).resize((width, height), Image.Resampling.BICUBIC)
 
             if warm_factor > 0.0:
-                warm_pulse = 0.65 + 0.35 * (0.5 + 0.5 * math.sin(pose_idx * 1.5))
                 bloom = _make_smooth_radial_glow(
                     width,
                     height,
                     center_xy=(0.45, 0.42),
                     color=(255, 220, 130),
-                    max_alpha=int(46 * warm_factor * warm_pulse),
+                    max_alpha=int(42 * warm_factor),
                     radius_scale=0.68,
                 )
                 frame = Image.alpha_composite(frame.convert("RGBA"), bloom).convert("RGB")
             return _apply_tilt_shift_dof(frame)
 
-        # Fallback 2-keyframe: Start Frame (redup, sakelar bawah) -> End Frame (sakelar atas, cahaya studio hangat)
+        # Fallback 2-keyframe: Start Frame -> End Frame dengan S-curve blend halus
         dim_start = raw_bg if end_bg is not None else ImageEnhance.Brightness(raw_bg).enhance(0.68)
         bright_end = end_bg if end_bg is not None else ImageEnhance.Brightness(raw_bg).enhance(1.25)
-        flip_p = _clamp((p_step - 0.34) / 0.10)
-        if flip_p <= 0.0:
-            pre_dy = int(-p_step * 10) + jy
-            frame = ImageChops.offset(dim_start, jx, pre_dy)
-        else:
-            blended = Image.blend(dim_start, bright_end, flip_p)
-            frame = ImageChops.offset(blended, jx, jy)
-            warm_pulse = 0.65 + 0.35 * (0.5 + 0.5 * math.sin(pose_idx * 1.5))
+        flip_p = 0.5 - 0.5 * math.cos(math.pi * _clamp((p_smooth - 0.30) / 0.35))
+        frame = Image.blend(dim_start, bright_end, flip_p)
+        if flip_p > 0.05:
             bloom = _make_smooth_radial_glow(
                 width,
                 height,
                 center_xy=(0.45, 0.42),
                 color=(255, 220, 130),
-                max_alpha=int(48 * flip_p * warm_pulse),
+                max_alpha=int(44 * flip_p),
                 radius_scale=0.68,
             )
             frame = Image.alpha_composite(frame.convert("RGBA"), bloom).convert("RGB")

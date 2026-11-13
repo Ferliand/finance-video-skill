@@ -138,7 +138,7 @@ def cmd_render(a) -> int:
     p = _project(a.slug)
     brief = p.load_brief()
     style = getattr(a, "style", None) or brief.style
-    fps = getattr(a, "fps", None) or (12 if style.strip().lower() == "claymation" else 15)
+    fps = getattr(a, "fps", None) or 24
     keep_audio = bool(getattr(a, "keep_audio", False))
     audio_file_arg = getattr(a, "audio_file", None)
     full_audio = Path(audio_file_arg) if audio_file_arg else None
