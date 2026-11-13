@@ -532,7 +532,7 @@ def _apply_clay_stop_motion(
             frame = Image.alpha_composite(frame.convert("RGBA"), bloom).convert("RGB")
         return _apply_tilt_shift_dof(frame)
 
-    return _apply_fullscreen_ken_burns(raw_bg, width=width, height=height, p=p_step, scene_id=scene.id)
+    return _apply_fullscreen_ken_burns(raw_bg, width=width, height=height, p=p_smooth, scene_id=scene.id)
 def _apply_fullscreen_ken_burns(
     bg: Image.Image,
     width: int,
