@@ -139,6 +139,61 @@ def _draw_wrapped_text(
     return y
 
 
+_NO_BREAK_AFTER_WORDS = {
+    "di", "ke", "dari", "pada", "untuk", "dengan", "tanpa", "agar", "supaya",
+    "yang", "dan", "atau", "karena", "sebab", "seperti", "menuju", "dalam",
+    "akan", "bisa", "dapat", "ikut", "harus", "mulai", "saat", "ketika", "jika",
+}
+_COMPOUND_NEXT_WORDS = {
+    ("malam", "hari"), ("siang", "hari"), ("pagi", "hari"), ("sore", "hari"),
+    ("masa", "depan"), ("masa", "depanmu"), ("tanpa", "terasa"), ("setiap", "hari"),
+    ("uang", "sisa"), ("kebiasaan", "baru"), ("layar", "ponsel"), ("baterai", "fokus"),
+}
+
+
+def _chunk_words_semantic(words: list[WordTiming], max_words: int = 5) -> list[list[WordTiming]]:
+    """Pecah kata subtitle berdasarkan kesatuan frasa makna (Semantic Chunking), bukan potong kaku per N kata."""
+    if not words:
+        return []
+    if len(words) <= max_words:
+        return [list(words)]
+
+    chunks: list[list[WordTiming]] = []
+    cur: list[WordTiming] = []
+    min_words = max(2, max_words - 2)
+    n = len(words)
+
+    for i, wt in enumerate(words):
+        cur.append(wt)
+        if i == n - 1:
+            break
+
+        w_clean = re.sub(r"[^\w]", "", wt.word.lower())
+        next_clean = re.sub(r"[^\w]", "", words[i + 1].word.lower())
+        has_punct = wt.word.endswith((",", ".", "!", "?", ";", ":"))
+
+        # Jika jumlah kata masih di bawah batas minimum, jangan potong kecuali ada titik
+        if len(cur) < min_words and not wt.word.endswith((".", "!", "?")):
+            continue
+
+        # Jangan memutus tepat setelah kata depan/penghubung atau di tengah frasa majemuk jika masih muat
+        is_protected_pair = (w_clean in _NO_BREAK_AFTER_WORDS) or ((w_clean, next_clean) in _COMPOUND_NEXT_WORDS)
+        if is_protected_pair and len(cur) < max_words + 1:
+            continue
+
+        # Potong pada tanda baca atau saat mencapai max_words (dan kata berikutnya bukan pasangan terlindung)
+        if has_punct or len(cur) >= max_words:
+            # Hindari menyisakan 1 kata yatim di chunk terakhir
+            if n - (i + 1) == 1 and len(cur) <= max_words:
+                continue
+            chunks.append(cur)
+            cur = []
+
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
 def _draw_karaoke_subtitle(
     draw: ImageDraw.ImageDraw,
     scene: Scene,
@@ -148,22 +203,32 @@ def _draw_karaoke_subtitle(
     height: int,
     is_vertical: bool,
 ) -> None:
-    """Gambar subtitle karaoke sinematik langsung di atas vignette bawah (tanpa kotak pembungkus kaku)."""
+    """Gambar subtitle karaoke dengan Semantic Chunking (4-6 kata utuh) & Vertical Safe Zone (8% X, 12% bawah)."""
     words = scene.words or compute_word_timings(scene.narration, duration)
     if not words:
         return
     act_idx = active_word_index(words, t)
-    chunk_size = 7 if is_vertical else 11
-    page_idx = act_idx // chunk_size
-    chunk = words[page_idx * chunk_size : (page_idx + 1) * chunk_size]
-    local_act = act_idx - page_idx * chunk_size
+    max_words = 5 if is_vertical else 9
+    chunks = _chunk_words_semantic(words, max_words=max_words)
 
-    margin_x = int(width * 0.07)
-    sub_zone_top = int(height * 0.74) if is_vertical else int(height * 0.76)
-    sub_zone_bot = int(height * 0.90) if is_vertical else int(height * 0.91)
+    # Cari chunk yang memuat act_idx
+    chunk: list[WordTiming] = chunks[0]
+    local_act = 0
+    offset = 0
+    for ch in chunks:
+        if offset + len(ch) > act_idx:
+            chunk = ch
+            local_act = act_idx - offset
+            break
+        offset += len(ch)
 
-    font = _load_font(46 if is_vertical else 42, bold=True)
-    max_line_w = (width - 2 * margin_x) - 40
+    # Safe zone vertikal 9:16: minimal 8% kiri/kanan, 12% bawah
+    margin_x = int(width * 0.08)
+    sub_zone_top = int(height * 0.72) if is_vertical else int(height * 0.75)
+    sub_zone_bot = int(height * 0.88) if is_vertical else int(height * 0.90)
+
+    font = _load_font(44 if is_vertical else 42, bold=True)
+    max_line_w = (width - 2 * margin_x) - 24
 
     lines: list[list[tuple[int, str, int]]] = []
     cur_line: list[tuple[int, str, int]] = []
@@ -174,9 +239,17 @@ def _draw_karaoke_subtitle(
         wb = draw.textbbox((0, 0), wt.word, font=font)
         ww = wb[2] - wb[0]
         if cur_line and cur_w + space_w + ww > max_line_w:
-            lines.append(cur_line)
-            cur_line = [(idx, wt.word, ww)]
-            cur_w = ww
+            # Jika kata terakhir di baris pertama adalah kata depan/penghubung, pindahkan ke baris kedua bersama pasangannya
+            prev_clean = re.sub(r"[^\w]", "", cur_line[-1][1].lower())
+            if prev_clean in _NO_BREAK_AFTER_WORDS and len(cur_line) > 1:
+                carried = cur_line.pop()
+                lines.append(cur_line)
+                cur_line = [carried, (idx, wt.word, ww)]
+                cur_w = carried[2] + space_w + ww
+            else:
+                lines.append(cur_line)
+                cur_line = [(idx, wt.word, ww)]
+                cur_w = ww
         else:
             cur_w += (space_w if cur_line else 0) + ww
             cur_line.append((idx, wt.word, ww))
@@ -266,27 +339,15 @@ def _interpolate_progressive_poses(
     p: float,
     order: tuple[int, ...] | None = None,
 ) -> Image.Image:
-    """Interpolasi progresif satu arah (Start -> Mid -> End) tanpa pengulangan (no loop) dengan S-curve cross-blend halus."""
+    """Pilih keyframe pose secara progresif satu arah (Start -> Mid -> End) dengan instant cut stop-motion tanpa cross-dissolve."""
     seq = [poses[i % len(poses)] for i in order] if order else list(poses)
     n = len(seq)
     if n == 1:
         return seq[0]
 
-    # Bagi progres [0..1] menjadi (n) segmen: tiap segmen punya plateau tenang (55%) + transisi S-curve halus (45%)
-    scaled = _clamp(p, 0.0, 0.9999) * (n - 1)
-    idx = int(scaled)
-    frac = scaled - idx
-    if idx >= n - 1:
-        return seq[-1]
-
-    # Plateau hold di awal & akhir segmen (0.0..0.20 dan 0.80..1.0), cross-blend S-curve di tengah (0.20..0.80)
-    if frac <= 0.20:
-        return seq[idx]
-    if frac >= 0.80:
-        return seq[idx + 1]
-    t_blend = (frac - 0.20) / 0.60
-    smooth_alpha = 0.5 - 0.5 * math.cos(math.pi * t_blend)
-    return Image.blend(seq[idx], seq[idx + 1], smooth_alpha)
+    # Bagi progres [0..1] menjadi n bagian merata dengan instant cut tegas (tanpa opacity blend agar bebas ghosting)
+    idx = min(n - 1, int(_clamp(p, 0.0, 0.9999) * n))
+    return seq[idx]
 
 
 def _apply_clay_stop_motion(
@@ -603,18 +664,25 @@ def render_scene_frame_at(
 
     _draw_ambient_particles(draw, width, height, t=t, scene_id=scene.id)
 
-    # Progress bar tipis elegan di tepi paling atas (6px)
-    bar_h = 6
-    draw.rectangle([0, 0, width, bar_h], fill=(255, 255, 255, 55))
-    prog_w = max(8, int(width * p))
-    draw.rectangle([0, 0, prog_w, bar_h], fill=(ACCENT[0], ACCENT[1], ACCENT[2], 235))
+    # Progress bar tipis elegan diletakkan di atas area teks subtitle (safe zone, bukan di y=0)
+    bar_h = 4
+    bar_y = int(height * 0.70) if is_vertical else int(height * 0.73)
+    bar_margin = int(width * 0.08)
+    bar_total_w = width - 2 * bar_margin
+    draw.rounded_rectangle([bar_margin, bar_y, width - bar_margin, bar_y + bar_h], radius=2, fill=(255, 255, 255, 45))
+    prog_w = max(8, int(bar_total_w * p))
+    draw.rounded_rectangle(
+        [bar_margin, bar_y, bar_margin + prog_w, bar_y + bar_h],
+        radius=2,
+        fill=(ACCENT[0], ACCENT[1], ACCENT[2], 210),
+    )
 
     font_badge = _load_font(26 if is_vertical else 22, bold=True)
     font_title = _load_font(60 if is_vertical else 54, bold=True)
     font_formula = _load_font(74 if is_vertical else 68, bold=True)
 
     cx = width // 2
-    margin_x = int(width * 0.07)
+    margin_x = int(width * 0.08)
 
     words = scene.words or compute_word_timings(scene.narration, duration)
     act_idx = active_word_index(words, t)

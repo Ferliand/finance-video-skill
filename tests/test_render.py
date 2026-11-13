@@ -157,4 +157,15 @@ def test_claymation_motion_modes_detect_and_animate():
         assert diff.getbbox() is not None
 
 
+def test_semantic_chunking_keeps_prepositions_and_compounds_together():
+    from vengine.render import _chunk_words_semantic, compute_word_timings
+
+    text = "Layar ponsel yang menyala terang di malam hari menguras energimu."
+    words = compute_word_timings(text, 4.0)
+    chunks = _chunk_words_semantic(words, max_words=5)
+    joined_chunks = [" ".join(w.word for w in ch) for ch in chunks]
+    assert any("di malam hari" in jc for jc in joined_chunks), f"Expected 'di malam hari' intact, got {joined_chunks}"
+
+
+
 
