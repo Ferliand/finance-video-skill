@@ -78,3 +78,9 @@ Agen (kamu) yang menulis naskah. Skrip `scripts/vengine_cli.py` menyiapkan keran
 - `Proyek ... tidak ditemukan` → periksa folder kerja; proyek berada di `./video-projects/` pada folder tempat perintah dijalankan, atau di `--home`.
 - Lint `mirip_referensi` → letakkan transkrip referensi sebagai `.txt` di `./references/` (atau `--refs DIR`); tulis ulang bagian yang dilaporkan dengan kata-katamu sendiri.
 - Lint `total_kata` → tambah atau kurangi scene di beat yang menyimpang jauh dari target (lihat `status`), lalu `add --replace`.
+
+## Mode Layered Puppet (2.5D Claymation)
+
+Untuk video 3D Claymation bebas *flicker* dan konsisten:
+1. Potong sprite sheet 2×2 menjadi PNG transparan dengan `python -m vengine slice-sprites <slug> --sheet <file> --char <nama> --poses p1,p2,p3,p4`.
+2. Isi `background_file` (latar ruangan kosong yang dipakai ulang) dan `puppet_layers` (`sprite`, `x`, `y`, `scale`, `motion`: `breathe|hop|shake|slump|peek|static`, opsional `pose_sprites`) pada scene di `scenes.json` sebelum menjalankan `render`.

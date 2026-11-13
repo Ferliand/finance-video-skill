@@ -76,6 +76,19 @@ class WordTiming(BaseModel):
     end: float
 
 
+PuppetMotion = Literal["breathe", "hop", "shake", "slump", "peek", "static"]
+
+
+class PuppetLayer(BaseModel):
+    sprite: str
+    x: float = 0.5
+    y: float = 0.64
+    scale: float = 0.68
+    motion: PuppetMotion = "breathe"
+    flip_x: bool = False
+    pose_sprites: list[str] = Field(default_factory=list)
+
+
 class Scene(BaseModel):
     id: int
     beat: str
@@ -98,6 +111,8 @@ class Scene(BaseModel):
     audio_file: str | None = None
     image_file: str | None = None
     end_image_file: str | None = None
+    background_file: str | None = None
+    puppet_layers: list[PuppetLayer] = Field(default_factory=list)
     pose_files: list[str] = Field(default_factory=list)
     duration: float | None = None
     words: list[WordTiming] = Field(default_factory=list)

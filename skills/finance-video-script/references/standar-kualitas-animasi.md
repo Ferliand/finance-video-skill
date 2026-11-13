@@ -53,3 +53,24 @@ Dokumen ini adalah pedoman wajib yang harus dipatuhi setiap kali membuat aset ga
    - **Top margin:** minimal **`180px` bersih** (dilarang menaruh progress bar di `y = 0`; letakkan tipis di atas area teks subtitle atau hilangkan).
    - **Bottom margin:** tempatkan subtitle di rentang **`280px` hingga `380px` dari tepi bawah** agar bebas dari UI caption TikTok/Reels/Shorts.
    - **Horizontal padding:** minimal **`90px` kiri dan kanan**.
+
+## D. Arsitektur Layered Puppet (2.5D Puppet) untuk 3D Claymation
+
+Untuk menghindari tekstur tanah liat yang berkedip-kedip (*boiling texture*) dan tata letak kamar yang berubah-ubah antar-scene, pisahkan **Background Statis** dan **Sprite Karakter**:
+
+1. **Background Ruangan Kosong (Static / Slow-Zoom Layer):**
+   - Generate 1–2 gambar latar ruangan kosong tanpa karakter (misalnya sudut kasur atau sudut lemari).
+   - Gunakan file yang sama pada field `background_file` di banyak scene. Renderer akan memberi *depth-of-field blur* tipis dan *slow zoom* halus agar latar stabil.
+
+2. **Sprite Sheet 2×2 & Penghapusan Background (`slice-sprites`):**
+   - Generate 1 lembar **Sprite Sheet Grid 2×2** berisi 4 ekspresi/pose karakter di atas latar polos kontras (putih/hijau/abu polos) agar proporsi wajah dan kostum 100% konsisten.
+   - Jalankan CLI untuk memotong dan membuat background transparan (`RGBA` PNG):
+     ```bash
+     python -m vengine slice-sprites <slug> --sheet <path_sheet> --char poci --poses diam,marah,kaget,sedih
+     ```
+   - Hasil tersimpan di `out/sprites/<char>/<pose>.png`.
+
+3. **Animasi Prosedural & Pose Swap Instan (`puppet_layers`):**
+   - Tambahkan `puppet_layers` pada `Scene` (`sprite`, `x`, `y`, `scale`, `motion`, `flip_x`, `pose_sprites`).
+   - Mode gerak prosedural yang tersedia: `breathe`, `hop`, `shake`, `slump`, `peek`, `static`.
+   - Saat mengisi `pose_sprites` (daftar sprite per ketukan), pergantian ekspresi dilakukan secara **instant cut** (tanpa cross-dissolve) dengan bayangan kontak halus di bawah karakter.

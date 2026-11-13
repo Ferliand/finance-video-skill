@@ -660,6 +660,96 @@ def _resolve_scene_end_bg(
     return None
 
 
+def _spring_overshoot(t: float) -> float:
+    """Kurva pegas organik ala Remotion spring() untuk animasi masuk karakter."""
+    t = max(0.0, t)
+    return 1.0 - math.exp(-7.0 * t) * math.cos(11.0 * t)
+
+
+def _render_layered_puppet_scene(
+    raw_bg: Image.Image,
+    scene: Scene,
+    width: int,
+    height: int,
+    t: float,
+    duration: float,
+    project_root: Path | None = None,
+) -> Image.Image:
+    """Render komposisi 2.5D Layered Puppet: Background blur + slow zoom di belakang, Sprite PNG ber-alpha di depan."""
+    p = _clamp(t / max(0.1, duration))
+    # Layer 0: Background statis dengan sedikit depth-of-field blur & slow zoom mulus (tanpa flickering)
+    bg_fit = raw_bg.resize((width, height), Image.Resampling.BICUBIC) if raw_bg.size != (width, height) else raw_bg.copy()
+    bg_soft = bg_fit.filter(ImageFilter.GaussianBlur(radius=2.0))
+    zoom = 1.0 + 0.07 * _ease_out_cubic(p)
+    cw, ch = max(1, int(round(width / zoom))), max(1, int(round(height / zoom)))
+    cx, cy = (width - cw) // 2, (height - ch) // 2
+    canvas_rgba = bg_soft.crop((cx, cy, cx + cw, cy + ch)).resize((width, height), Image.Resampling.BICUBIC).convert("RGBA")
+
+    # Layer 1: Puppet Sprites dengan gerak fisika prosedural + instant-cut expression swap
+    for layer in scene.puppet_layers:
+        sprite_rel = layer.sprite
+        if layer.pose_sprites:
+            idx = min(len(layer.pose_sprites) - 1, int(_clamp(p, 0.0, 0.9999) * len(layer.pose_sprites)))
+            sprite_rel = layer.pose_sprites[idx]
+
+        sp_path = (project_root / sprite_rel) if (project_root and not Path(sprite_rel).is_absolute()) else Path(sprite_rel)
+        if not sp_path.exists():
+            continue
+        with Image.open(sp_path) as loaded_sp:
+            sp_img = loaded_sp.convert("RGBA")
+
+        if layer.flip_x:
+            sp_img = sp_img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+
+        target_h = max(40, int(round(height * layer.scale)))
+        aspect = sp_img.width / max(1, sp_img.height)
+        target_w = max(40, int(round(target_h * aspect)))
+
+        dx, dy = 0.0, 0.0
+        sx, sy = 1.0, 1.0
+        if layer.motion == "hop":
+            hop_wave = abs(math.sin(t * math.pi * 2.2))
+            dy = -hop_wave * (height * 0.025)
+            sy = 1.0 + 0.04 * (hop_wave - 0.5)
+            sx = 1.0 - 0.03 * (hop_wave - 0.5)
+        elif layer.motion == "shake":
+            dx = math.sin(t * 48.0) * (width * 0.014)
+            dy = math.cos(t * 36.0) * (height * 0.004)
+        elif layer.motion == "slump":
+            slump_p = _ease_out_cubic(p)
+            dy = slump_p * (height * 0.055)
+            sy = 1.0 - 0.05 * slump_p
+        elif layer.motion == "peek":
+            sp_curve = _spring_overshoot(min(1.2, t * 1.4))
+            dx = (1.0 - sp_curve) * (-width * 0.18 if layer.x < 0.5 else width * 0.18)
+        elif layer.motion == "breathe":
+            dy = math.sin(t * 2.4) * (height * 0.005)
+
+        rw = max(10, int(round(target_w * sx)))
+        rh = max(10, int(round(target_h * sy)))
+        sp_resized = sp_img.resize((rw, rh), Image.Resampling.LANCZOS)
+
+        px = int(round(width * layer.x - rw / 2 + dx))
+        py = int(round(height * layer.y - rh / 2 + dy))
+
+        # Bayangan kontak lembut di bawah sprite
+        shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        s_draw = ImageDraw.Draw(shadow_layer)
+        sh_w = int(rw * 0.58)
+        sh_h = max(12, int(rh * 0.07))
+        sh_cx = px + rw // 2
+        sh_cy = py + rh - sh_h // 2
+        s_draw.ellipse([sh_cx - sh_w // 2, sh_cy - sh_h // 2, sh_cx + sh_w // 2, sh_cy + sh_h // 2], fill=(0, 0, 0, 95))
+        shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=10))
+        canvas_rgba = Image.alpha_composite(canvas_rgba, shadow_layer)
+
+        sprite_canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        sprite_canvas.paste(sp_resized, (px, py), sp_resized)
+        canvas_rgba = Image.alpha_composite(canvas_rgba, sprite_canvas)
+
+    return canvas_rgba.convert("RGB")
+
+
 # ---------- Core Animated Full-Screen Frame Renderer ----------
 def render_scene_frame_at(
     scene: Scene,
@@ -670,8 +760,9 @@ def render_scene_frame_at(
     bg_image: Image.Image | None = None,
     end_bg_image: Image.Image | None = None,
     pose_images: list[Image.Image] | None = None,
+    project_root: Path | None = None,
 ) -> Image.Image:
-    """Render satu frame Image full-screen pada waktu t (detik) dengan Ken Burns / Clay Stop-Motion & glassmorphism RGBA."""
+    """Render satu frame Image full-screen pada waktu t (detik) dengan Layered Puppet / Clay Stop-Motion / Ken Burns."""
     duration = max(0.5, duration)
     t = _clamp(t, 0.0, duration)
     p = t / duration
@@ -681,10 +772,14 @@ def render_scene_frame_at(
     width, height = (1080, 1920) if is_vertical else (1920, 1080)
     ptype = scene.page_type or "illustration"
 
-    # 1. Layer Dasar: Full-Screen AI Image + Clay Stop-Motion atau Ken Burns
+    # 1. Layer Dasar: Layered Puppet (2.5D) ATAU Full-Screen AI Image + Stop-Motion / Ken Burns
     raw_bg = _resolve_scene_bg(scene, width=width, height=height, bg_image=bg_image)
     raw_end_bg = _resolve_scene_end_bg(scene, width=width, height=height, end_bg_image=end_bg_image)
-    if scene.motion_prompt or raw_end_bg is not None or (pose_images and len(pose_images) >= 2):
+    if scene.puppet_layers:
+        zoomed_bg = _render_layered_puppet_scene(
+            raw_bg, scene, width=width, height=height, t=t, duration=duration, project_root=project_root
+        )
+    elif scene.motion_prompt or raw_end_bg is not None or (pose_images and len(pose_images) >= 2):
         zoomed_bg = _apply_clay_stop_motion(
             raw_bg,
             raw_end_bg,
@@ -941,6 +1036,7 @@ def render_scene_frame(
     bg_image: Image.Image | None = None,
     end_bg_image: Image.Image | None = None,
     pose_images: list[Image.Image] | None = None,
+    project_root: Path | None = None,
 ) -> Path:
     """Simpan satu snapshot PNG dari scene (default pada t=1.0 dtk untuk thumbnail/pratinjau)."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -953,6 +1049,7 @@ def render_scene_frame(
         bg_image=bg_image,
         end_bg_image=end_bg_image,
         pose_images=pose_images,
+        project_root=project_root,
     )
     img.save(out_path, format="PNG")
     return out_path
@@ -1039,6 +1136,7 @@ def _render_animated_segment(
     bg_image: Image.Image | None = None,
     end_bg_image: Image.Image | None = None,
     pose_images: list[Image.Image] | None = None,
+    project_root: Path | None = None,
 ) -> None:
     """Pipe rangkaian frame animasi RGB langsung ke FFmpeg untuk menghasilkan segmen MP4 yang bergerak halus."""
     is_vertical = fmt == "S"
@@ -1078,6 +1176,7 @@ def _render_animated_segment(
                 bg_image=bg_image,
                 end_bg_image=end_bg_image,
                 pose_images=pose_images,
+                project_root=project_root,
             )
             proc.stdin.write(frame_img.tobytes())
         proc.stdin.close()
@@ -1232,8 +1331,9 @@ def render_project(
         seg_path = segments_dir / f"seg_{s.id:03d}.mp4"
 
         bg_img: Image.Image | None = None
-        if s.image_file:
-            img_p = project.root / s.image_file
+        bg_rel = s.background_file or s.image_file
+        if bg_rel:
+            img_p = project.root / bg_rel
             if img_p.exists():
                 with Image.open(img_p) as loaded:
                     bg_img = loaded.convert("RGB")
@@ -1272,6 +1372,7 @@ def render_project(
             bg_image=bg_img,
             end_bg_image=end_bg_img,
             pose_images=pose_imgs or None,
+            project_root=project.root,
         )
         s.audio_file = str(audio_path.relative_to(project.root))
 
@@ -1287,6 +1388,7 @@ def render_project(
             bg_image=bg_img,
             end_bg_image=end_bg_img,
             pose_images=pose_imgs or None,
+            project_root=project.root,
         )
         segment_files.append(seg_path)
 

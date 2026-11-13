@@ -167,5 +167,64 @@ def test_semantic_chunking_keeps_prepositions_and_compounds_together():
     assert any("di malam hari" in jc for jc in joined_chunks), f"Expected 'di malam hari' intact, got {joined_chunks}"
 
 
+def test_split_sprite_sheet_2x2_removes_background(tmp_path):
+    from PIL import Image, ImageDraw
+    from vengine.sprites import split_sprite_sheet_2x2
+
+    sheet = Image.new("RGB", (400, 400), (245, 245, 245))
+    draw = ImageDraw.Draw(sheet)
+    centers = [(100, 100, (220, 60, 60)), (300, 100, (60, 180, 90)), (100, 300, (60, 110, 220)), (300, 300, (220, 170, 40))]
+    for cx, cy, col in centers:
+        draw.ellipse((cx - 45, cy - 45, cx + 45, cy + 45), fill=col)
+
+    sheet_path = tmp_path / "sheet.png"
+    sheet.save(sheet_path)
+
+    out_dir = tmp_path / "sprites"
+    paths = split_sprite_sheet_2x2(
+        sheet_path,
+        out_dir,
+        pose_names=("idle", "angry", "shocked", "sad"),
+        remove_bg=True,
+    )
+    assert len(paths) == 4
+    for p, expected_name in zip(paths, ("idle.png", "angry.png", "shocked.png", "sad.png")):
+        assert p.name == expected_name
+        assert p.exists()
+        with Image.open(p) as sp:
+            assert sp.mode == "RGBA"
+            # Corner must be transparent, center must be opaque
+            assert sp.getpixel((0, 0))[3] == 0
+            assert sp.getpixel((sp.width // 2, sp.height // 2))[3] > 200
+
+
+def test_layered_puppet_scene_renders_motion(tmp_path):
+    from PIL import Image, ImageChops, ImageDraw
+    from vengine.schema import PuppetLayer, Scene
+    from vengine.render import render_scene_frame_at
+
+    bg = Image.new("RGB", (540, 960), (45, 38, 32))
+    sprite = Image.new("RGBA", (200, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(sprite).ellipse((40, 20, 160, 280), fill=(240, 235, 225, 255))
+    sprite_path = tmp_path / "poci.png"
+    sprite.save(sprite_path)
+
+    for motion in ("hop", "shake"):
+        sc = Scene(
+            id=1,
+            beat="hook",
+            narration="Hihihi penghuni baru.",
+            puppet_layers=[
+                PuppetLayer(sprite="poci.png", x=0.5, y=0.65, scale=0.65, motion=motion),
+            ],
+        )
+        f1 = render_scene_frame_at(sc, t=0.1, duration=2.0, fmt="S", bg_image=bg, project_root=tmp_path)
+        f2 = render_scene_frame_at(sc, t=0.55, duration=2.0, fmt="S", bg_image=bg, project_root=tmp_path)
+        assert f1.size == (1080, 1920)
+        assert f2.size == (1080, 1920)
+        assert ImageChops.difference(f1, f2).getbbox() is not None
+
+
+
 
 

@@ -133,6 +133,23 @@ def cmd_generate_images(a) -> int:
     return 0
 
 
+def cmd_slice_sprites(a) -> int:
+    from .sprites import split_sprite_sheet_2x2
+    p = _project(a.slug)
+    poses = [x.strip() for x in a.poses.split(",") if x.strip()]
+    out_dir = p.out_dir / "sprites" / a.char
+    paths = split_sprite_sheet_2x2(
+        Path(a.sheet),
+        out_dir,
+        pose_names=poses or ("pose1", "pose2", "pose3", "pose4"),
+        remove_bg=not a.keep_bg,
+    )
+    print(f"Selesai! {len(paths)} sprite karakter '{a.char}' siap di: {out_dir}")
+    for path in paths:
+        print(f" - {path.relative_to(p.root)}")
+    return 0
+
+
 def cmd_render(a) -> int:
     from .render import render_project
     p = _project(a.slug)
@@ -190,6 +207,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--scene", type=int, default=None, help="hanya generate ulang nomor scene tertentu")
     s.add_argument("--force", action="store_true", help="timpa file gambar yang sudah ada")
     s.set_defaults(fn=cmd_generate_images)
+
+    s = sub.add_parser("slice-sprites", help="potong sprite sheet 2x2 menjadi PNG transparan per pose")
+    s.add_argument("slug")
+    s.add_argument("--sheet", required=True, help="path ke file gambar sprite sheet 2x2")
+    s.add_argument("--char", required=True, help="nama folder karakter (contoh: poci)")
+    s.add_argument("--poses", default="pose1,pose2,pose3,pose4", help="4 nama pose dipisah koma")
+    s.add_argument("--keep-bg", action="store_true", help="jangan hapus background polos")
+    s.set_defaults(fn=cmd_slice_sprites)
     s = sub.add_parser("render"); s.add_argument("slug")
     s.add_argument("--voice", default="id-ID-ArdiNeural", help="suara edge-tts atau 'elevenlabs:<voice_id>' (default: id-ID-ArdiNeural)")
     s.add_argument("--style", default=None, help="preset atau custom style visual jika gambar belum dibuat")
